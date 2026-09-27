@@ -1,5 +1,8 @@
 #include "Hooks.h"
 
+#include "GpuEventTimers.h"
+#include "RenderGraph/NvPerfBridge.h"
+#include "GpuIdleTrace.h"
 #include "ShaderTools/BSShaderHooks.h"
 #include "ShaderTools/LegacyGraphicsCompatibility.h"
 #include "Utils/ExternalEmittance.h"
@@ -17,6 +20,7 @@
 #include "TruePBR.h"
 #include "Util.h"
 
+#include "Features/DrawcallLimitFix.h"
 #include "Features/Effects11.h"
 #include "Features/HDRDisplay.h"
 #include "Features/InteriorSun.h"
@@ -32,6 +36,7 @@
 #include "Features/Upscaling/DXVKInterop.h"
 #include "Features/Upscaling/Streamline.h"
 #include "Features/VolumetricLighting.h"
+#include "Utils/ImportCallSites.h"
 
 #include <xmmintrin.h>
 #include <unordered_map>
@@ -241,6 +246,8 @@ namespace LightingExtensions
 		{
 			globals::state->UpdateLightingShaderPermutation(pass);
 			func(shader, pass, renderFlags);
+			if (globals::features::drawcallLimitFix.loaded)
+				globals::features::drawcallLimitFix.OnNativeLightingDraw(pass, renderFlags);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -413,6 +420,10 @@ struct IDXGISwapChain_Present
 		// Nsight Perf passes span one frame's rendering: ended before the overlay and Present, begun after.
 		NvPerf::OnPresentBegin();
 
+		ZoneScopedN("CS.Present");
+		GpuIdleTrace::OnPresent();
+		GpuEventTimers::OnPresent();
+		NvPerfBridge::OnPresent();
 		globals::state->Reset();
 
 		// DLSS-G on Vulkan requires SyncInterval 0.
@@ -444,7 +455,10 @@ struct IDXGISwapChain_Present
 			[&](IDXGISwapChain* swapChain, UINT syncInterval, UINT presentFlags) {
 				return globals::features::upscaling.PresentWithFrameGeneration(
 					swapChain, syncInterval, presentFlags,
-					[&](IDXGISwapChain* sc, UINT si, UINT f) { return func(sc, si, f); });
+					[&](IDXGISwapChain* sc, UINT si, UINT f) {
+						ZoneScopedN("CS.Present.NativeWait");
+						return func(sc, si, f);
+					});
 			});
 
 		streamline->SetPCLMarker(Streamline::PclMarker::PresentEnd);
@@ -1333,6 +1347,9 @@ namespace Hooks
 			*(uintptr_t*)&ptrD3D11CreateDeviceAndSwapChain = dxvkLoaded ?
 			                                                     reinterpret_cast<uintptr_t>(DxvkLoader::GetD3D11CreateDeviceAndSwapChain()) :
 			                                                     iatOriginal;
+			// The IAT patch alone does not survive RenderDoc; see RedirectImportCallSites.
+			Util::RedirectImportCallSites(::GetModuleHandleW(nullptr), "d3d11.dll", "D3D11CreateDeviceAndSwapChain",
+				reinterpret_cast<void*>(&hk_D3D11CreateDeviceAndSwapChain));
 		}
 
 		logger::info("Hooking CreateDXGIFactory");
@@ -1340,5 +1357,7 @@ namespace Hooks
 		*(uintptr_t*)&ptrCreateDXGIFactory = dxvkLoaded ?
 		                                         reinterpret_cast<uintptr_t>(DxvkLoader::GetCreateDXGIFactory()) :
 		                                         dxgiOriginal;
+		Util::RedirectImportCallSites(::GetModuleHandleW(nullptr), "dxgi.dll", "CreateDXGIFactory",
+			reinterpret_cast<void*>(&hk_CreateDXGIFactory));
 	}
 }

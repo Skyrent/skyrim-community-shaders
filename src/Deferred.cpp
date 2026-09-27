@@ -7,6 +7,7 @@
 #include "Utils/D3D.h"
 
 #include "Features/CSEditor.h"
+#include "Features/DrawcallLimitFix.h"
 #include "Features/DynamicCubemaps.h"
 #include "Features/Effects11.h"
 #include "Features/IBL.h"
@@ -444,6 +445,9 @@ void Deferred::EndDeferred()
 	auto context = globals::d3d::context;
 	context->OMSetRenderTargets(0, nullptr, nullptr);  // Unbind all bound render targets
 
+	if (globals::features::drawcallLimitFix.loaded)
+		globals::features::drawcallLimitFix.BeforeDeferredComposite();
+
 	DeferredPasses();  // Perform deferred passes and composite forward buffers
 
 	stateUpdateFlags.set(RE::BSGraphics::ShaderFlags::DIRTY_RENDERTARGET);  // Run OMSetRenderTargets again
@@ -653,7 +657,11 @@ ID3D11ComputeShader* Deferred::GetComputeMainCompositeInterior()
 
 void Deferred::Hooks::Main_RenderShadowMaps::thunk()
 {
+	// DCLF's pre-hook: the scene graph and the main culling are final here, the shadow views are drawn
+	// inside the call, and the main accumulator's passes are complete only once it returns.
+	globals::features::drawcallLimitFix.BeforeShadowMaps();
 	func();
+	globals::features::drawcallLimitFix.AfterShadowMaps();
 	globals::deferred->EarlyPrepasses();
 };
 
@@ -673,6 +681,8 @@ void Deferred::Hooks::Main_RenderWorld_Start::thunk(RE::BSBatchRenderer* This, u
 	if (globals::shaderCache->IsEnabled() && globals::state->inWorld) {
 		// Here is where the first opaque objects start rendering
 		globals::deferred->StartDeferred();
+		if (globals::features::drawcallLimitFix.loaded)
+			globals::features::drawcallLimitFix.BeforeOpaquePass();
 	}
 
 	func(This, StartRange, EndRanges, RenderFlags, GeometryGroup);  // RenderBatches
@@ -683,6 +693,14 @@ void Deferred::Hooks::Main_RenderWorld_BlendedDecals::thunk(RE::BSShaderAccumula
 	auto deferred = globals::deferred;
 
 	if (globals::shaderCache->IsEnabled() && globals::state->inWorld) {
+		// The opaque batches are done: DCLF draws its objects where the engine would have, before anything
+		// that blends onto or tests against them.
+		if (globals::features::drawcallLimitFix.loaded) {
+			globals::features::drawcallLimitFix.ProbeOpaqueTarget(false);
+			globals::features::drawcallLimitFix.AfterOpaquePass();
+			globals::features::drawcallLimitFix.ProbeOpaqueTarget(true);
+		}
+
 		auto& terrainBlending = globals::features::terrainBlending;
 		// Defer terrain rendering until after everything else
 		if (terrainBlending.loaded && terrainBlending.settings.Enabled) {
