@@ -1,6 +1,8 @@
 #ifndef __PERMUTATION_DEPENDENCY_HLSL__
 #define __PERMUTATION_DEPENDENCY_HLSL__
 
+#include "Common/NamespacedCBuffer.hlsli"
+
 namespace Permutation
 {
 
@@ -99,16 +101,23 @@ namespace Permutation
 
 	cbuffer PerShader : register(b4)
 	{
-		uint VertexShaderDescriptor;
-		uint PixelShaderDescriptor;
-		uint ExtraShaderDescriptor;
-		uint ExtraFeatureDescriptor;
+		uint NSCB(Permutation, VertexShaderDescriptor);
+		uint NSCB(Permutation, PixelShaderDescriptor);
+		uint NSCB(Permutation, ExtraShaderDescriptor);
+		uint NSCB(Permutation, ExtraFeatureDescriptor);
 
-		float EffectRadius;
-		uint BaseTextureIsWorking;
-		uint RenderToUI;
-		uint pad;
+		float NSCB(Permutation, EffectRadius);
+		uint NSCB(Permutation, BaseTextureIsWorking);
+		uint NSCB(Permutation, RenderToUI);
+		uint NSCB(Permutation, pad);
 	};
+	NSCB_ALIAS(Permutation, uint, VertexShaderDescriptor)
+	NSCB_ALIAS(Permutation, uint, PixelShaderDescriptor)
+	NSCB_ALIAS(Permutation, uint, ExtraShaderDescriptor)
+	NSCB_ALIAS(Permutation, uint, ExtraFeatureDescriptor)
+	NSCB_ALIAS(Permutation, float, EffectRadius)
+	NSCB_ALIAS(Permutation, uint, BaseTextureIsWorking)
+	NSCB_ALIAS(Permutation, uint, RenderToUI)
 
 }
 #endif  // __PERMUTATION_DEPENDENCY_HLSL__

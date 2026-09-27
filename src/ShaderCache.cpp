@@ -16,6 +16,7 @@
 #include "Utils/ShaderContentStore.h"
 
 #include "Features/DynamicCubemaps.h"
+#include "Features/DrawcallLimitFix/ShaderPrograms.h"
 
 #include "Plugin.h"
 
@@ -1220,10 +1221,22 @@ namespace SIE
 					 (0b1111ull << (4 * attribute + 4)));
 		}
 
+		// A constant table entry: the variable's offset in its buffer, in floats. The engine reads entries unsigned,
+		// so a variable has to start within the first 256 floats of its buffer.
+		static uint8_t ConstantTableEntry(uint32_t startOffsetBytes, const char* name, ShaderClass shaderClass, const RE::BSShader& shader, uint32_t descriptor)
+		{
+			const uint32_t offset = startOffsetBytes / 4;
+			if (offset > std::numeric_limits<uint8_t>::max()) {
+				logger::error("Variable {} in {} shader {}::{:X} starts at float {}, beyond what a constant table entry holds",
+					name, magic_enum::enum_name(shaderClass), magic_enum::enum_name(shader.shaderType.get()), descriptor, offset);
+			}
+			return static_cast<uint8_t>(offset);
+		}
+
 		template <size_t MaxOffsetsSize>
 		static void ReflectConstantBuffers(ID3D11ShaderReflection& reflector,
 			std::array<size_t, 3>& bufferSizes,
-			std::array<int8_t, MaxOffsetsSize>& constantOffsets,
+			std::array<uint8_t, MaxOffsetsSize>& constantOffsets,
 			uint64_t& vertexDesc,
 			ShaderClass shaderClass, uint32_t descriptor, const RE::BSShader& shader)
 		{
@@ -1325,7 +1338,7 @@ namespace SIE
 							GetVariableIndex(shaderClass, shader, varDesc.Name);
 						const bool variableFound = variableIndex != -1;
 						if (variableFound) {
-							constantOffsets[variableIndex] = (int8_t)(varDesc.StartOffset / 4);
+							constantOffsets[variableIndex] = ConstantTableEntry(varDesc.StartOffset, varDesc.Name, shaderClass, shader, descriptor);
 						} else {
 							logger::trace("Unknown variable name {} in {} shader {}::{:X}",
 								varDesc.Name, magic_enum::enum_name(shaderClass),
@@ -1343,7 +1356,7 @@ namespace SIE
 									const auto variableArrayIndex =
 										GetVariableIndex(shaderClass, shader, arrayName.c_str());
 									if (variableArrayIndex != -1) {
-										constantOffsets[variableArrayIndex] = static_cast<int8_t>(varDesc.StartOffset / 4);
+										constantOffsets[variableArrayIndex] = ConstantTableEntry(varDesc.StartOffset, arrayName.c_str(), shaderClass, shader, descriptor);
 									} else {
 										logger::debug("Unknown variable name {} in {} shader {}::{:X}",
 											arrayName, magic_enum::enum_name(shaderClass),
@@ -1358,8 +1371,8 @@ namespace SIE
 										const auto variableArrayElementIndex =
 											GetVariableIndex(shaderClass, shader, varName.c_str());
 										if (variableArrayElementIndex != -1) {
-											constantOffsets[variableArrayElementIndex] =
-												static_cast<int8_t>((varDesc.StartOffset + elementSize * arrayIndex) / 4);
+											constantOffsets[variableArrayElementIndex] = ConstantTableEntry(
+												varDesc.StartOffset + elementSize * arrayIndex, varName.c_str(), shaderClass, shader, descriptor);
 										} else {
 											logger::debug(
 												"Unknown variable name {} in {} shader {}::{:X}", varName,
@@ -1383,6 +1396,9 @@ namespace SIE
 
 		std::wstring GetDiskPath(const RE::BSShader& shader, uint32_t descriptor, ShaderClass shaderClass)
 		{
+			globals::state->GetDefines();  // [TEMP] applies CS_DCLF_SHADOW_DEBUG_OUTPUT before the name is taken
+			// Both grass depth techniques compile with identical defines and share one in-memory
+			// key, so they must also share one disk entry; separate files could load mismatched bytecode.
 			const std::string_view name = shader.fxpFilename;
 			if (name == "RunGrass" &&
 				(descriptor & 0b1111) == static_cast<uint32_t>(ShaderCache::GrassShaderTechniques::RenderDepthStencil)) {
@@ -1968,7 +1984,7 @@ namespace SIE
 					descriptor);
 			} else {
 				std::array<size_t, 3> bufferSizes = { 0, 0, 0 };
-				std::ranges::fill(newShader->constantTable, (int8_t)0);
+				std::ranges::fill(newShader->constantTable, static_cast<uint8_t>(0));
 				uint64_t dummy;
 				ReflectConstantBuffers(*reflector.get(), bufferSizes, newShader->constantTable,
 					dummy,
@@ -2700,7 +2716,10 @@ namespace SIE
 
 	bool ShaderCache::IsCompiling()
 	{
-		return compilationSet.totalTasks && compilationSet.completedTasks + compilationSet.failedTasks < compilationSet.totalTasks;
+		// ORG requests retained before renderer initialization also run in this pool.
+		// Keep the initial compilation gate up until those stage futures have completed.
+		return (compilationSet.totalTasks && compilationSet.completedTasks + compilationSet.failedTasks < compilationSet.totalTasks) ||
+		       compilationPool.get_tasks_total() != 0;
 	}
 
 	void ShaderCache::StopCompilation()
@@ -3332,6 +3351,30 @@ namespace SIE
 		return SIE::SShaderCache::MergeDefinesString(defines, true);
 	}
 
+	std::vector<std::pair<std::string, std::string>> ShaderCache::GetCompileDefines(const RE::BSShader& shader, ShaderClass shaderClass, uint32_t descriptor)
+	{
+		// Same composition as the D3DCompile path in CompileShader.
+		std::vector<std::pair<std::string, std::string>> result;
+		if (shaderClass == ShaderClass::Vertex)
+			result.emplace_back("VSHADER", "");
+		else if (shaderClass == ShaderClass::Pixel)
+			result.emplace_back("PSHADER", "");
+		else if (shaderClass == ShaderClass::Compute)
+			result.emplace_back("CSHADER", "");
+		if (auto* stateDefines = globals::state->GetDefines()) {
+			for (const auto& define : *stateDefines)
+				result.push_back(define);
+		}
+		std::array<D3D_SHADER_MACRO, 64> defines{};
+		SIE::SShaderCache::GetShaderDefines(shader, descriptor, std::span{ defines });
+		for (const auto& define : defines) {
+			if (!define.Name)
+				break;
+			result.emplace_back(define.Name, define.Definition ? define.Definition : "");
+		}
+		return result;
+	}
+
 	uint64_t ShaderCache::GetCachedHitTasks()
 	{
 		return compilationSet.cacheHitTasks;
@@ -3800,6 +3843,14 @@ namespace SIE
 			ShaderCache::Instance().MakeAndAddPixelShader(shader, descriptor);
 		} else if (shaderClass == ShaderClass::Compute) {
 			ShaderCache::Instance().MakeAndAddComputeShader(shader, descriptor);
+		}
+		if (shaderClass == ShaderClass::Vertex || shaderClass == ShaderClass::Pixel) {
+			try {
+				DCLF::ShaderPrograms::Get().Precompile(shader, shaderClass == ShaderClass::Pixel, descriptor);
+			} catch (const std::exception& e) {
+				// An optional ORG artifact must not turn a successful native compile into a failed task.
+				logger::warn("[DCLF] ORG shader precompile failed: {}", e.what());
+			}
 		}
 	}
 
