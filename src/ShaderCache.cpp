@@ -1339,7 +1339,7 @@ namespace SIE
 
 		std::wstring GetDiskPath(const std::string_view& name, uint32_t descriptor, ShaderClass shaderClass)
 		{
-			globals::state->GetDefines();  // [TEMP] applies CS_DCLF_SHADOW_DEBUG_OUTPUT before the name is taken
+			globals::state->GetDefines();  // applies CS_DCLF_SHADOW_DEBUG_OUTPUT before the name is taken
 			// Both grass depth techniques compile with identical defines and share one in-memory
 			// key, so they must also share one disk entry; separate files could load mismatched bytecode.
 			if (name == "RunGrass" &&
