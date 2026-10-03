@@ -96,6 +96,16 @@ namespace Permutation
 		static const int TVMeshVariation = (1 << 10);
 	}
 
+#if defined(DCLF_PULLED_ROWS)
+	// Drawcall Limit Fix's pulled Lighting stages (DCLF_PULLED_ROWS): the block is the draw's pipeline row's, which a plain draw
+	// cannot bind per draw, so the stage's main assigns these from the row (Lighting.hlsl, DCLFPermutationStatics) before
+	// anything reads them.
+	static uint VertexShaderDescriptor;
+	static uint PixelShaderDescriptor;
+	static uint ExtraShaderDescriptor;
+	static uint ExtraFeatureDescriptor;
+	static float EffectRadius;
+#else
 	cbuffer PerShader : register(b4)
 	{
 		uint NSCB(Permutation, VertexShaderDescriptor);
@@ -110,6 +120,7 @@ namespace Permutation
 	NSCB_ALIAS(Permutation, uint, ExtraShaderDescriptor)
 	NSCB_ALIAS(Permutation, uint, ExtraFeatureDescriptor)
 	NSCB_ALIAS(Permutation, float, EffectRadius)
+#endif  // DCLF_PULLED_ROWS
 
 }
 #endif  // __PERMUTATION_DEPENDENCY_HLSL__
