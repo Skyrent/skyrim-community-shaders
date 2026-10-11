@@ -194,9 +194,15 @@ namespace NvPerf
 			};
 			std::map<std::string, Totals> byName;
 			std::vector<std::string> order;
+			const auto keyOf = [&](const std::string& a_name) -> const std::string& {
+				const std::string* filter = MatchingFilter(a_result.ranges, a_name);
+				return filter ? *filter : a_name;
+			};
 			for (const auto& range : a_result.rangeResults) {
-				const std::string* filter = MatchingFilter(a_result.ranges, range.name);
-				const std::string& key = filter ? *filter : range.name;
+				const std::string& key = keyOf(range.name);
+				// With nesting levels, a selected range inside one with the same key is part of that range's counters.
+				if (std::ranges::any_of(range.enclosing, [&](const std::string& a_parent) { return keyOf(a_parent) == key; }))
+					continue;
 				auto [entry, inserted] = byName.try_emplace(key);
 				if (inserted)
 					order.push_back(key);
@@ -828,6 +834,8 @@ namespace NvPerf
 				range.name = path.empty() ? "<unnamed>" : path.back();
 				for (const auto& part : path)
 					range.path += range.path.empty() ? part : " / " + part;
+				if (!path.empty())
+					range.enclosing.assign(path.begin(), path.end() - 1);
 				range.occurrence = occurrences[range.path]++;
 				range.values = values;
 				a_capture.result.rangeResults.push_back(std::move(range));

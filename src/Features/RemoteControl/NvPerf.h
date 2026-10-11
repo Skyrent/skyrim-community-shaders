@@ -47,14 +47,16 @@ namespace NvPerf
 	struct RangeResult
 	{
 		std::uint32_t sample = 0;
-		std::string name;  // the range's own name
-		std::string path;  // its enclosing selected ranges and itself, joined with " / "
+		std::string name;                    // the range's own name
+		std::string path;                    // its enclosing selected ranges and itself, joined with " / "
+		std::vector<std::string> enclosing;  // its enclosing selected ranges, outermost first
 		std::uint32_t occurrence = 0;
 		std::vector<double> values;
 	};
 
 	/// The ranges matching one filter (or one name, with no filters), per frame: counters summed, rates weighted by each
-	/// range's gpu__time_duration. A value a replay pass could not complete (NaN) is left out and counted.
+	/// range's gpu__time_duration. A range nested in one that matches the same filter is already part of it and is left
+	/// out. A value a replay pass could not complete (NaN) is left out and counted.
 	struct RangeSummary
 	{
 		std::string name;

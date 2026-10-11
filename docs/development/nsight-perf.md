@@ -53,7 +53,8 @@ all users in the NVIDIA Control Panel ([ERR_NVGPUCTRPERM](https://developer.nvid
 Results:
 
 -   **Summary:** per filter (or per name, with no filters) and per frame. Counters are summed and
-    rates are weighted by each range's `gpu__time_duration`.
+    rates are weighted by each range's `gpu__time_duration`. A range nested inside one that
+    matches the same filter is already counted in it, so only the outer one is summarized.
 -   **CSV:** every range of every sample is appended to `CommunityShaders-NvPerf.csv` next to
     `CommunityShaders.log`.
 
