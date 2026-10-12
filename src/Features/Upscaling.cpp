@@ -1,4 +1,5 @@
 #include "Upscaling.h"
+#include "DrawcallLimitFix/Diagnostics/TargetDump.h"
 
 #include "../I18n/I18n.h"
 #include "Deferred.h"
@@ -1662,6 +1663,7 @@ void Upscaling::Upscale()
 		const auto renderSize = Util::ConvertToDynamic(displaySize);
 		auto result = Streamline::EvaluationResult::kFailed;
 
+		DCLF::TargetDump::Point("before upscale");
 		if (upscaledTexture && upscaledTexture->resource) {
 			switch (method) {
 			case UpscaleMethod::kFSR:
@@ -1695,6 +1697,7 @@ void Upscaling::Upscale()
 		// into that list's init buffer, ahead of any timestamp a D3D11 timer here would write.
 		if (result == Streamline::EvaluationResult::kReady)
 			context->CopyResource(main.texture, upscaledTexture->resource.get());
+		DCLF::TargetDump::Point("after upscale", upscaledTexture && upscaledTexture->resource ? upscaledTexture->resource.get() : nullptr);
 
 		state->EndPerfEvent();
 	}
