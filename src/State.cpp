@@ -11,7 +11,6 @@
 #include "EngineFixes/SunShadowMaskFix.h"
 #include "Features/DrawcallLimitFix/Runtime/Switches.h"
 #include "Features/DrawcallLimitFix.h"
-#include "Features/DrawcallLimitFix/Diagnostics/Hooks.h"
 #include "GpuEventTimers.h"
 #include "RenderGraph/NvPerfBridge.h"
 #include "GpuIdleTrace.h"
@@ -124,9 +123,6 @@ void State::UpdateEffectShaderPermutation(RE::BSRenderPass* a_pass)
 void State::Draw()
 {
 	ZoneScoped;
-	if (DCLF::Diagnostics::Armed<DCLF::Diagnostics::NativeDraw>())
-		globals::features::drawcallLimitFix.NoteNativeDraw(currentShader, currentPixelDescriptor);
-
 	auto shaderCache = globals::shaderCache;
 	auto weatherManager = globals::weatherManager;
 	auto sceneSettingsManager = globals::sceneSettingsManager;
