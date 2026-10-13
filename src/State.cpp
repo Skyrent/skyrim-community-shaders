@@ -5,8 +5,9 @@
 #include <pystring/pystring.h>
 
 #include "Deferred.h"
-#include "Features/DrawcallLimitFix/Common/Switches.h"
+#include "Features/DrawcallLimitFix/Runtime/Switches.h"
 #include "Features/DrawcallLimitFix.h"
+#include "Features/DrawcallLimitFix/Diagnostics/Hooks.h"
 #include "GpuEventTimers.h"
 #include "RenderGraph/NvPerfBridge.h"
 #include "GpuIdleTrace.h"
@@ -72,8 +73,8 @@ void State::UpdateSkyShaderPermutation(RE::BSRenderPass* a_pass)
 void State::Draw()
 {
 	ZoneScoped;
-	if (globals::features::drawcallLimitFix.DrawCensusOn())
-		globals::features::drawcallLimitFix.NoteNativeDraw(currentShader, currentVertexDescriptor, currentPixelDescriptor);
+	if (DCLF::Diagnostics::Armed<DCLF::Diagnostics::NativeDraw>())
+		globals::features::drawcallLimitFix.NoteNativeDraw(currentShader, currentPixelDescriptor);
 
 	auto shaderCache = globals::shaderCache;
 	auto weatherManager = globals::weatherManager;
