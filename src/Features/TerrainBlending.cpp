@@ -392,11 +392,8 @@ void TerrainBlending::RenderTerrainBlendingPasses()
 		// Enable rendering for depth below the surface
 		context->OMSetDepthStencilState(terrainDepthStencilState, 0xFF);
 
-		for (auto& renderPass : terrainRenderPasses) {
+		for (auto& renderPass : terrainRenderPasses)
 			Hooks::BSBatchRenderer__RenderPassImmediately::func(renderPass.a_pass, renderPass.a_technique, renderPass.a_alphaTest, renderPass.a_renderFlags);
-			if (globals::features::drawcallLimitFix.loaded)
-				globals::features::drawcallLimitFix.ProbeTerrainPass(static_cast<std::uint32_t>(&renderPass - terrainRenderPasses.data()), renderPass.a_pass);
-		}
 
 		// Reset alpha blending
 		alphaBlendMode = 0;
