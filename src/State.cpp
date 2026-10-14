@@ -5,7 +5,7 @@
 #include <pystring/pystring.h>
 
 #include "Deferred.h"
-#include "Features/DrawcallLimitFix/Runtime/Switches.h"
+#include "Utils/SwitchFile.h"
 #include "Features/DrawcallLimitFix.h"
 #include "GpuEventTimers.h"
 #include "RenderGraph/NvPerfBridge.h"
@@ -761,7 +761,7 @@ std::vector<std::pair<std::string, std::string>>* State::GetDefines()
 {
 	// CS_DCLF_SHADOW_DEBUG_OUTPUT (dclf-open-defects.md): Lighting.hlsl writes chosen intermediate values into the Diffuse
 	// target, native and DCLF alike (DCLF_SHADOW_DEBUG).
-	const bool shadowDebug = DCLF::SwitchEnabled(DCLF::Switch::ShadowDebugOutput);
+	static const bool shadowDebug = Util::SwitchFile::Enabled("CS_DCLF_SHADOW_DEBUG_OUTPUT");
 	if (shadowDebug && std::ranges::none_of(shaderDefines, [](const auto& a_define) { return a_define.first == "DCLF_SHADOW_DEBUG"; })) {
 		shaderDefines.emplace_back("DCLF_SHADOW_DEBUG", "1");
 		// The disk cache's file names carry this string, so the debug builds are cached apart.
