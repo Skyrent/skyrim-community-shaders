@@ -619,6 +619,7 @@ void DynamicCubemaps::PostDeferred()
 		(activeReflections ? envReflectionsTextureBC6H : envTextureBC6H)->srv.get(),
 		envTextureBC6H->srv.get()
 	};
+	boundReflectionsView = views[0];
 	context->PSSetShaderResources(30, 2, views);
 }
 
