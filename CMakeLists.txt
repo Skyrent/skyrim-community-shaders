@@ -444,7 +444,6 @@ configure_file(
 target_sources(
     "${PROJECT_NAME}"
     PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/cmake/FeatureVersions.h
-        src/Features/DrawcallLimitFix/Scene/Model/ActorValueIndex.h
 )
 
 # #######################################################################################################################
