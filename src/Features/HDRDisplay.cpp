@@ -1028,10 +1028,17 @@ HRESULT HDRDisplay::HandleSwapChainPresent(
 	UINT viewportCount = 1;
 	globals::d3d::context->RSGetViewports(&viewportCount, &savedViewport);
 
-	DrawImGuiForPresent();
-	globals::menu->DrawOverlay();
+	{
+		ZoneScopedN("CS.Present.ImGuiTarget");
+		DrawImGuiForPresent();
+	}
+	{
+		ZoneScopedN("CS.Present.Overlay");
+		globals::menu->DrawOverlay();
+	}
 	globals::d3d::context->RSSetViewports(1, &savedViewport);
 
+	ZoneScopedN("CS.Present.HdrChain");
 	return RunPresentChainWithHDR(swapChain, syncInterval, flags, hdrReady, presentChain);
 }
 
