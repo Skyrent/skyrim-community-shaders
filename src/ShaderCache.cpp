@@ -1332,7 +1332,7 @@ namespace SIE
 				descriptor = (descriptor & ~0b1111u) | static_cast<uint32_t>(ShaderCache::GrassShaderTechniques::RenderDepth);
 			}
 
-			const auto suffixNarrow = Util::GetShaderDefinesSuffix(globals::state->shaderDefinesString);
+			const auto suffixNarrow = Util::GetShaderDefinesSuffix(globals::state->GetDefinesString());
 			const std::wstring suffix(suffixNarrow.begin(), suffixNarrow.end());
 
 			const auto wname = std::wstring(name.begin(), name.end());
@@ -2871,9 +2871,11 @@ namespace SIE
 					newShader->shader->Release();
 				}
 			} else {
-				return vertexShaders[static_cast<size_t>(shader.shaderType.get())]
-				    .insert_or_assign(descriptor, std::move(newShader))
-				    .first->second.get();
+				auto& entry = vertexShaders[static_cast<size_t>(shader.shaderType.get())][descriptor];
+				if (entry && entry->shader)
+					entry->shader->Release();
+				entry = std::move(newShader);
+				return entry.get();
 			}
 		}
 		return nullptr;
@@ -2900,9 +2902,11 @@ namespace SIE
 					newShader->shader->Release();
 				}
 			} else {
-				return pixelShaders[static_cast<size_t>(shader.shaderType.get())]
-				    .insert_or_assign(descriptor, std::move(newShader))
-				    .first->second.get();
+				auto& entry = pixelShaders[static_cast<size_t>(shader.shaderType.get())][descriptor];
+				if (entry && entry->shader)
+					entry->shader->Release();
+				entry = std::move(newShader);
+				return entry.get();
 			}
 		}
 		return nullptr;
@@ -2929,9 +2933,11 @@ namespace SIE
 					newShader->shader->Release();
 				}
 			} else {
-				return computeShaders[static_cast<size_t>(shader.shaderType.get())]
-				    .insert_or_assign(descriptor, std::move(newShader))
-				    .first->second.get();
+				auto& entry = computeShaders[static_cast<size_t>(shader.shaderType.get())][descriptor];
+				if (entry && entry->shader)
+					entry->shader->Release();
+				entry = std::move(newShader);
+				return entry.get();
 			}
 		}
 		return nullptr;

@@ -8,6 +8,7 @@
 #include "Aftermath.h"
 #include "D3DX9MathUpgrade.h"
 #include "DxvkLoader.h"
+#include "EngineFix.h"
 #include "Feature.h"
 #include "Globals.h"
 #include "Menu.h"
@@ -20,6 +21,7 @@
 #include "Features/HDRDisplay.h"
 #include "Features/InteriorSun.h"
 #include "Features/LightLimitFix.h"
+#include "Features/RainRefraction.h"
 #include "Features/RemoteControl/NvPerf.h"
 #include "Features/RenderDoc.h"
 #include "Features/ScreenshotFeature.h"
@@ -117,6 +119,7 @@ struct BSShader_LoadShaders
 				Feature::ForEachLoadedFeature("GenerateShaderPermutations", [shader](Feature* feature) {
 					feature->GenerateShaderPermutations(shader);
 				});
+				EngineFix::GenerateAllShaderPermutations(shader);
 			}
 
 			for (const auto& entry : shader->vertexShaders) {
@@ -396,8 +399,8 @@ namespace PostProcessingExtensions
 		static void thunk(RE::BSShader* This, RE::BSRenderPass* Pass, uint32_t RenderFlags)
 		{
 			func(This, Pass, RenderFlags);
-			if (globals::features::effects11.loaded)
-				globals::features::effects11.ModifyParticle(Pass);
+			if (globals::features::rainRefraction.loaded)
+				globals::features::rainRefraction.ModifyParticle();
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};

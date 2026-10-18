@@ -1490,6 +1490,11 @@ void EditorWindow::UpdateOpenState()
 		lightEditor.ResetOverrides();
 		RestoreVanityCamera();
 		ShowGameMenus();
+		delete tempTexture;
+		tempTexture = nullptr;
+		for (auto& widget : weatherWidgets)
+			if (auto* weatherWidget = dynamic_cast<WeatherWidget*>(widget.get()))
+				weatherWidget->cloudTextureCache.clear();
 	}
 
 	wasOpen = open;
@@ -1539,7 +1544,7 @@ void EditorWindow::Draw()
 						D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
 						framebuffer.SRV->GetDesc(&srvDesc);
 
-						tempTexture = new Texture2D(texDesc);
+						tempTexture = new Texture2D(texDesc, "CSEditor::ViewportCopy");
 						tempTexture->CreateSRV(srvDesc);
 					}
 
