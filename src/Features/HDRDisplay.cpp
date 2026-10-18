@@ -575,6 +575,10 @@ void HDRDisplay::LoadSettings(json& o_json)
 	std::lock_guard<std::mutex> lock(settingsMutex);
 
 	settings = o_json;
+	settings.hdrPeakNits = std::clamp(settings.hdrPeakNits, kHdrPeakNitsMin, kHdrPeakNitsMax);
+	settings.hdrPaperWhite = std::clamp(settings.hdrPaperWhite, 80u, settings.hdrPeakNits - 1);
+	if (!std::isfinite(settings.hdrUIBrightness))
+		settings.hdrUIBrightness = 1.0f;
 
 	// Defer auto-detection to SetupResources where the swap chain is available.
 	// DetectHDR() needs globals::d3d::swapChain which isn't valid during early plugin init.

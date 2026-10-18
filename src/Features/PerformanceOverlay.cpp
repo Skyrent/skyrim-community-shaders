@@ -188,7 +188,7 @@ void PerformanceOverlay::DrawSettings()
 		ImGui::Checkbox(T(TKEY("show_border"), "Show Border"), &this->settings.ShowBorder);
 		ImGui::SliderFloat(T(TKEY("update_interval"), "Update Interval"), &this->settings.UpdateInterval, 0.001f, PerformanceOverlay::Settings::kMaxUpdateInterval, "%.2f seconds");
 		ImGui::SliderInt(T(TKEY("frame_history_size"), "Frame History Size"), &this->settings.FrameHistorySize,
-			this->settings.kMinFrameHistorySize, this->settings.kMaxFrameHistorySize);
+			this->settings.kMinFrameHistorySize, this->settings.kMaxFrameHistorySize, "%d", ImGuiSliderFlags_AlwaysClamp);
 
 		ImGui::Separator();
 		ImGui::Text("%s", T(TKEY("position"), "Position:"));
@@ -260,9 +260,6 @@ void PerformanceOverlay::DrawOverlay()
 		return;
 	}
 	if (!menu->overlayVisible) {
-		return;
-	}
-	if (this->settings.ShowVRAM && (!menu->GetDXGIAdapter3())) {
 		return;
 	}
 	if (!ImGui::GetCurrentContext()) {
@@ -1934,14 +1931,7 @@ void PerformanceOverlay::UpdateMetrics()
 	                  static_cast<float>(state.overlayTimingFrequency.QuadPart);
 	state.lastUpdateTime = now;
 
-	// This clock only advances while the overlay is being drawn, so closing the menu and reopening
-	// it later produces one enormous "frame" covering the whole gap -- a 29 second sample was
-	// observed. Pushed into the history it swamps the worst one percent and drags the 1% low to
-	// zero, and it poisons the min/max the graph is scaled against. It is not a frame that was
-	// ever rendered, so drop the sample and resume timing from here.
-	constexpr float kMaxPlausibleFrameMs = 500.0f;
-	if (deltaTime > kMaxPlausibleFrameMs / 1000.0f || deltaTime <= 0.0f ||
-		state.frameTimeMs > kMaxPlausibleFrameMs || state.frameTimeMs <= 0.0f)
+	if (!state.graphSampleGate.ShouldSample())
 		return;
 
 	// Insert latest frame time into circular buffer
