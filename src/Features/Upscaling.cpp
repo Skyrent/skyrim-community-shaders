@@ -338,7 +338,10 @@ void Upscaling::LoadSettings(json& o_json)
 		settings.reflexLowLatencyMode = false;
 		settings.reflexLowLatencyBoost = false;
 	}
-
+	if (settings.qualityMode > 4) {
+		logger::warn("[Upscaling] Loaded qualityMode {} out of range, clamping to 4 (Ultra Performance)", settings.qualityMode);
+		settings.qualityMode = 4;
+	}
 	auto iniSettingCollection = globals::game::iniPrefSettingCollection;
 	if (iniSettingCollection) {
 		auto setting = iniSettingCollection->GetSetting("bUseTAA:Display");
@@ -456,10 +459,7 @@ void Upscaling::PostPostLoad()
 	// Performs upscaling between volumetric lighting and post-processing.
 	stl::write_thunk_call<Main_PostProcessing>(REL::RelocationID(100430, 107148).address() + REL::Relocate(0x1F0, 0x1E7));
 
-	// Scales scissor rectangles with the dynamic render resolution.
-	stl::detour_thunk<SetScissorRect>(REL::RelocationID(75564, 77365));
-
-	// Prevents dynamic resolution from affecting face-generation textures.
+	// Patches facegen texture generation to not use dynamic resolution
 	stl::detour_thunk<BSFaceGenManager_UpdatePendingCustomizationTextures>(REL::RelocationID(26455, 27041));
 
 	// Prevents dynamic resolution from affecting the precipitation camera.
@@ -1929,22 +1929,6 @@ void Upscaling::Main_PostProcessing::thunk(RE::ImageSpaceManager* a_this, uint32
 	}
 
 	Util::SetTemporal(false);
-}
-
-void Upscaling::SetScissorRect::thunk(RE::BSGraphics::Renderer* This, int a_left, int a_top, int a_right, int a_bottom)
-{
-	auto viewport = globals::game::graphicsState;
-	auto& runtimeData = viewport->GetRuntimeData();
-
-	if (!runtimeData.dynamicResolutionLock) {
-		a_left = static_cast<int>(a_left * runtimeData.dynamicResolutionWidthRatio);
-		a_right = static_cast<int>(a_right * runtimeData.dynamicResolutionWidthRatio);
-
-		a_top = static_cast<int>(a_top * runtimeData.dynamicResolutionHeightRatio);
-		a_bottom = static_cast<int>(a_bottom * runtimeData.dynamicResolutionHeightRatio);
-	}
-
-	func(This, a_left, a_top, a_right, a_bottom);
 }
 
 void Upscaling::Main_RenderPrecipitation::thunk()
