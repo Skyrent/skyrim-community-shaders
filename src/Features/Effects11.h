@@ -5,6 +5,10 @@
 #include <memory>
 #include <winrt/base.h>
 
+// C4324: the aligned PerFrame cache member pads the struct
+#pragma warning(push)
+#pragma warning(disable: 4324)
+
 struct Effects11 : Feature
 {
 public:
@@ -126,4 +130,17 @@ public:
 
 private:
 	bool tonemapReplacedThisFrame = false;  ///< Set when the effect chain writes the tonemap output during this render frame
+	/** @brief Point light settings, resolved once per frame in CheckCommonData since OverridePointLightColor runs per light. */
+	struct PointLightingParams
+	{
+		float curve = 1.0f;
+		float desaturation = 0.0f;
+		float intensity = 1.0f;
+	} pointLighting;
+
+	// The feature buffer is rebuilt several times per frame, so GetCommonBufferData's lookups are replayed from here
+	PerFrame perFrameCache{};
+	Util::FrameChecker perFrameCacheChecker;
 };
+
+#pragma warning(pop)

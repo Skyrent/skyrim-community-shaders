@@ -144,6 +144,7 @@ public:
 		int sourceOrder = INT_MAX;
 		bool isLabel = false;
 		bool isReadOnly = false;
+		bool isPatched = false;
 		bool isDefine = false;
 		bool isHidden = false;
 		bool isTopLevel = false;
@@ -248,9 +249,9 @@ public:
 
 	struct TechniqueSequenceResult
 	{
-		bool executed = false;
-		bool inOutput = false;
-		bool inTemp = false;
+		bool executed = false;  ///< At least one technique wrote the chain output (a_output or a_temp)
+		bool inOutput = false;  ///< The chain result is in a_output
+		bool inTemp = false;    ///< The chain result is in a_temp
 	};
 
 	// Execute a technique sequence with ping-pong rendering

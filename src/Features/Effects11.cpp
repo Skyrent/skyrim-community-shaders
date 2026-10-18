@@ -25,6 +25,9 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 
 	CheckCommonData();
 
+	if (!perFrameCacheChecker.IsNewFrame())
+		return perFrameCache;
+
 	auto& settingManager = SettingManager::GetSingleton();
 	PerFrame data{};
 
@@ -86,6 +89,7 @@ Effects11::PerFrame Effects11::GetCommonBufferData()
 
 	data.ProceduralSunGlowIntensity = settingManager.GetInterpolatedTimeOfDayValue("GlowIntensity", "PROCEDURALSUN");
 
+	perFrameCache = data;
 	return data;
 }
 
@@ -344,7 +348,7 @@ void Effects11::OverrideWeather(RE::Sky* a_sky)
 
 	{
 		auto fogAmountMultiplier = settingManager.GetInterpolatedTimeOfDayValue("FogAmountMultiplier", "ENVIRONMENT");
-		fogAmountMultiplier = std::max(fogAmountMultiplier, FLT_MIN);
+		fogAmountMultiplier = std::max(fogAmountMultiplier, 1e-4f);
 
 		a_sky->fogNear /= fogAmountMultiplier;
 		a_sky->fogFar /= fogAmountMultiplier;
@@ -484,36 +488,34 @@ void Effects11::CheckCommonData()
 		const auto& commonData = effectManager.GetCommonData();
 		settingManager.SetTimeOfDayData(commonData.timeOfDay1, commonData.timeOfDay2);
 		settingManager.SetWeatherBlendFactors(effectManager.currentWeatherID, effectManager.previousWeatherID, commonData.weather[2]);
+
+		pointLighting.curve = settingManager.GetInterpolatedTimeOfDayValue("PointLightingCurve", "ENVIRONMENT");
+		pointLighting.desaturation = settingManager.GetInterpolatedTimeOfDayValue("PointLightingDesaturation", "ENVIRONMENT");
+		pointLighting.intensity = settingManager.GetInterpolatedTimeOfDayValue("PointLightingIntensity", "ENVIRONMENT");
 	}
 }
 
 void Effects11::OverridePointLightColor(float3& a_color)
 {
-	auto& settingManager = SettingManager::GetSingleton();
-
-	a_color = Curve(a_color, settingManager.GetInterpolatedTimeOfDayValue("PointLightingCurve", "ENVIRONMENT"));
-	a_color = Desaturation(a_color, settingManager.GetInterpolatedTimeOfDayValue("PointLightingDesaturation", "ENVIRONMENT"));
-	a_color = Intensity(a_color, settingManager.GetInterpolatedTimeOfDayValue("PointLightingIntensity", "ENVIRONMENT"));
+	a_color = Curve(a_color, pointLighting.curve);
+	a_color = Desaturation(a_color, pointLighting.desaturation);
+	a_color = Intensity(a_color, pointLighting.intensity);
 }
 
 void Effects11::OverrideAmbientLighting(DirectionalAmbientColors& DirectionalAmbientColors)
 {
 	auto& settingManager = SettingManager::GetSingleton();
+	const float desaturation = settingManager.GetInterpolatedTimeOfDayValue("AmbientLightingDesaturation", "ENVIRONMENT");
+	const float intensity = settingManager.GetInterpolatedTimeOfDayValue("AmbientLightingIntensity", "ENVIRONMENT");
 
-	for (int i = 0; i < 3; i++) {
-		for (int j = 0; j < 2; j++) {
-			auto& ambientLightingColor = DirectionalAmbientColors.directionalAmbientColors[i][j];
+	auto& colors = DirectionalAmbientColors.directionalAmbientColors;
+	// ENB desaturates only side 3 (Y-), not the whole cube
+	auto& desaturatedSide = colors[1][1];
+	desaturatedSide = F3ToNi(Desaturation(NiToF3(desaturatedSide), desaturation));
 
-			float3 ambientLightingColorF3 = NiToF3(ambientLightingColor);
-
-			int currentSide = i * 2 + j;
-			if (currentSide == 3)
-				ambientLightingColorF3 = Desaturation(ambientLightingColorF3, settingManager.GetInterpolatedTimeOfDayValue("AmbientLightingDesaturation", "ENVIRONMENT"));
-
-			ambientLightingColorF3 = Intensity(ambientLightingColorF3, settingManager.GetInterpolatedTimeOfDayValue("AmbientLightingIntensity", "ENVIRONMENT"));
-
-			ambientLightingColor = F3ToNi(ambientLightingColorF3);
-		}
+	for (auto& axis : colors) {
+		for (auto& ambientLightingColor : axis)
+			ambientLightingColor = F3ToNi(Intensity(NiToF3(ambientLightingColor), intensity));
 	}
 }
 
@@ -576,7 +578,8 @@ void Effects11::ModifySky(RE::BSRenderPass* Pass)
 
 bool Effects11::IsRainEnabled()
 {
-	return enableEffect && raindropSRV && SettingManager::GetSingleton().GetValue<bool>("Enable", "RAIN");
+	// Queried for every rain particle pass, so the cached id skips the string-keyed lookup
+	return enableEffect && raindropSRV && SettingManager::GetSingleton().GetValue<bool>(EffectManager::GetSingleton().ids.enableRain);
 }
 
 void Effects11::ModifyParticle(RE::BSRenderPass* Pass)
@@ -628,11 +631,14 @@ void Effects11::ParticleShaderHacks()
 		blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
 		blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
 		blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-		globals::d3d::device->CreateBlendState(&blendDesc, alphaBlendState.put());
+		if (FAILED(globals::d3d::device->CreateBlendState(&blendDesc, alphaBlendState.put())))
+			return;
+		Util::SetResourceName(alphaBlendState.get(), "Effects11::RainAlphaBlendState");
 	}
 
 	float blendFactor[4] = { 0, 0, 0, 0 };
 	context->OMSetBlendState(alphaBlendState.get(), blendFactor, 0xFFFFFFFF);
+	globals::game::stateUpdateFlags->set(RE::BSGraphics::ShaderFlags::DIRTY_ALPHA_BLEND);
 }
 
 void Effects11::DrawVolumetricRays()
@@ -680,13 +686,13 @@ void Effects11::DrawVolumetricRays()
 	}
 
 	if (!blurHCS) {
-		blurHCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\ISVolumetricLightingBlurHCS.hlsl", {}, "cs_5_0"));
+		blurHCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\Effects11\\BlurVolumetricRaysCS.hlsl", { { "HORIZONTAL", nullptr } }, "cs_5_0"));
 		if (!blurHCS)
 			return;
 	}
 
 	if (!blurVCS) {
-		blurVCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\ISVolumetricLightingBlurVCS.hlsl", {}, "cs_5_0"));
+		blurVCS = static_cast<ID3D11ComputeShader*>(Util::CompileShader(L"Data\\Shaders\\Effects11\\BlurVolumetricRaysCS.hlsl", {}, "cs_5_0"));
 		if (!blurVCS)
 			return;
 	}

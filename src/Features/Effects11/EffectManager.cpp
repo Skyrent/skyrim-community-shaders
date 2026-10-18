@@ -137,9 +137,13 @@ void EffectManager::Apply()
 
 void EffectManager::Load()
 {
-	Effect* allEffects[] = { &enbBloom, &enbLens, &enbAdaptation, &enbEffect, &enbEffectPostPass };
+	EffectBase* allEffects[] = { &enbBloom, &enbLens, &enbAdaptation, &enbEffect, &enbEffectPostPass };
 	for (auto* effect : allEffects) {
 		effect->Load();
+#ifdef ENABLE_ENB_EXTENDER
+		if (effect->IsCompiled())
+			effect->LoadWeatherData();
+#endif
 		effect->UpdateUIVariables();
 	}
 }
@@ -320,6 +324,8 @@ void EffectManager::RegisterSettings()
 
 	ids.brightness = settingManager.GetSettingID("Brightness", "COLORCORRECTION");
 	ids.gammaCurve = settingManager.GetSettingID("GammaCurve", "COLORCORRECTION");
+
+	ids.enableRain = settingManager.GetSettingID("Enable", "RAIN");
 }
 
 void EffectManager::ExecuteEffect(EffectBase& a_effect, uint32_t enableSettingID)
@@ -347,7 +353,9 @@ bool EffectManager::ExecuteEffects(RE::BSGraphics::RenderTargetData& a_input, RE
 	auto context = globals::d3d::context;
 	auto renderer = globals::game::renderer;
 
-	if (!rasterizerState || !blendState || !quadVertexBuffer || !inputLayout || !renderer)
+	// Without the copy shaders the result cannot reach a_output (e.g. a failed ReloadShaders),
+	// so leave the frame to the stock pass before touching kMAIN
+	if (!rasterizerState || !blendState || !quadVertexBuffer || !inputLayout || !renderer || !copyVertexShader || !copyPixelShader)
 		return false;
 
 	// Without a preset nothing writes TextureSDRTemp, so the output RT would be copied from a
@@ -405,10 +413,10 @@ bool EffectManager::ExecuteEffects(RE::BSGraphics::RenderTargetData& a_input, RE
 	textureManager.IncrementTextureSwap();
 
 	auto* textureSDRTemp = textureManager.GetCommonTexture("TextureSDRTemp");
-	const bool wroteOutput = textureSDRTemp && a_output.RTV;
-	if (wroteOutput) {
+	bool wroteOutput = false;
+	if (textureSDRTemp && a_output.RTV) {
 		globals::profiler->BeginPass("Effects11::CopyToOutput");
-		CopyTexture(textureSDRTemp->srv.get(), a_output.RTV);
+		wroteOutput = CopyTexture(textureSDRTemp->srv.get(), a_output.RTV);
 		globals::profiler->EndPass();
 	}
 
@@ -549,6 +557,7 @@ void EffectManager::CreateCopyShaders()
 		return;
 
 	winrt::com_ptr<ID3DBlob> psBlob;
+	errorBlob = nullptr;  // Holds any vertex shader warnings, and put() requires an empty pointer
 	hr = D3DCompile(pixelShaderSource.data(), pixelShaderSource.size(), "CopyPS.hlsl", nullptr, nullptr,
 		"main", "ps_5_0", 0, 0, psBlob.put(), errorBlob.put());
 
@@ -625,11 +634,11 @@ void EffectManager::UpdateCommonData()
 	{
 		auto delta = (*globals::game::deltaTime);
 
-		static double timer = 0.0f;
+		static double timer = 0.0;
 		timer += delta;
 
-		auto modifiedTimer = std::fmodf(static_cast<float>(timer) * 1000.0f, 16777216);
-		modifiedTimer /= 16777216.0f;
+		// Wrap in double: as a float, milliseconds lose sub-frame precision after a few hours of play
+		auto modifiedTimer = static_cast<float>(std::fmod(timer * 1000.0, 16777216.0) / 16777216.0);
 
 		// Exponential smoothing with a ~0.5s time constant so Timer.y doesn't jitter per frame
 		static constexpr float fpsSmoothingRate = 2.0f;
@@ -646,19 +655,15 @@ void EffectManager::UpdateCommonData()
 
 	// Update weather
 	{
-		// Strip plugin index (2 leftmost digits) from form IDs
-		auto stripPluginIndex = [](uint32_t formID) -> uint32_t {
-			return formID & 0x00FFFFFF;  // Keep only the lower 6 hex digits
-		};
-
 		if (sky) {
 			if (sky->lastWeather)
 				cachedLastWeather = sky->lastWeather;
 			auto* lastWeather = sky->lastWeather ? sky->lastWeather : cachedLastWeather;
 
 			auto& weatherManager = WeatherManager::GetSingleton();
-			uint32_t currentID = sky->currentWeather ? stripPluginIndex(sky->currentWeather->formID) : 0;
-			uint32_t lastID = lastWeather ? stripPluginIndex(lastWeather->formID) : 0;
+			// Full form IDs, so same-numbered weathers from different plugins stay distinct
+			uint32_t currentID = sky->currentWeather ? sky->currentWeather->formID : 0;
+			uint32_t lastID = lastWeather ? lastWeather->formID : 0;
 
 			currentWeatherID = weatherManager.GetEffectiveWeatherID(currentID);
 			previousWeatherID = weatherManager.GetEffectiveWeatherID(lastID);
@@ -666,6 +671,11 @@ void EffectManager::UpdateCommonData()
 			commonData.weather[1] = static_cast<float>(previousWeatherID);
 			commonData.weather[2] = sky->currentWeatherPct;
 			commonData.weather[3] = sky->currentGameHour;
+
+			commonData.enbWeather[0] = static_cast<float>(weatherManager.GetWeatherIndex(currentWeatherID));
+			commonData.enbWeather[1] = static_cast<float>(weatherManager.GetWeatherIndex(previousWeatherID));
+			commonData.enbWeather[2] = commonData.weather[2];
+			commonData.enbWeather[3] = commonData.weather[3];
 		}
 	}
 
@@ -871,8 +881,8 @@ void EffectManager::UpdateLightParameters()
 	if (clip.w <= 0.0f)
 		return;
 
-	commonData.lightParameters[0] = clip.x / clip.w * 0.5f + 0.5f;
-	commonData.lightParameters[1] = clip.y / clip.w * -0.5f + 0.5f;
+	commonData.lightParameters[0] = clip.x / clip.w;
+	commonData.lightParameters[1] = clip.y / clip.w;
 	commonData.lightParameters[3] = visibility;
 }
 
@@ -891,32 +901,22 @@ void EffectManager::UpdateCommonVariablesForEffect(Effect& effect)
 	effect.SetShaderResourceVariable("TextureDepth",
 		renderer->GetDepthStencilData().depthStencils[RE::RENDER_TARGETS_DEPTHSTENCIL::kMAIN].depthSRV);
 
-	static const char* const formatTargets[] = {
+	static const std::string renderTargets[] = {
 		"RenderTargetRGBA32", "RenderTargetRGBA64", "RenderTargetRGBA64F",
-		"RenderTargetR16F", "RenderTargetR32F", "RenderTargetRGB32F"
-	};
-
-	for (const auto& targetName : formatTargets) {
-		auto* texture = effect.GetCachedCommonTexture(targetName);
-		if (texture) {
-			effect.SetShaderResourceVariable(targetName, texture->srv.get());
-		}
-	}
-
-	static const char* const fixedSizeTargets[] = {
+		"RenderTargetR16F", "RenderTargetR32F", "RenderTargetRGB32F",
 		"RenderTarget1024", "RenderTarget512", "RenderTarget256", "RenderTarget128",
 		"RenderTarget64", "RenderTarget32", "RenderTarget16"
 	};
 
-	for (const auto& targetName : fixedSizeTargets) {
-		auto* texture = effect.GetCachedCommonTexture(targetName);
-		if (texture) {
+	auto& textureManager = TextureManager::GetSingleton();
+	for (const auto& targetName : renderTargets) {
+		if (auto* texture = textureManager.FindCommonTexture(targetName))
 			effect.SetShaderResourceVariable(targetName, texture->srv.get());
-		}
 	}
 
 	effect.SetVectorVariable("Timer", commonData.timer, sizeof(commonData.timer));
-	effect.SetVectorVariable("Weather", commonData.weather, sizeof(commonData.weather));
+	effect.SetVectorVariable("Weather", commonData.enbWeather, sizeof(commonData.enbWeather));
+	effect.SetVectorVariable("WeatherAndTime", commonData.enbWeather, sizeof(commonData.enbWeather));
 	effect.SetVectorVariable("TimeOfDay1", commonData.timeOfDay1, sizeof(commonData.timeOfDay1));
 	effect.SetVectorVariable("TimeOfDay2", commonData.timeOfDay2, sizeof(commonData.timeOfDay2));
 	effect.SetVectorVariable("ENightDayFactor", &commonData.eNightDayFactor, sizeof(commonData.eNightDayFactor));
@@ -925,6 +925,9 @@ void EffectManager::UpdateCommonVariablesForEffect(Effect& effect)
 	effect.SetVectorVariable("tempInfo1", commonData.tempInfo1, sizeof(commonData.tempInfo1));
 	effect.SetVectorVariable("tempInfo2", commonData.tempInfo2, sizeof(commonData.tempInfo2));
 	effect.SetVectorVariable("LightParameters", commonData.lightParameters, sizeof(commonData.lightParameters));
+
+	static constexpr float adaptiveQuality = 0.0f;
+	effect.SetVectorVariable("AdaptiveQuality", &adaptiveQuality, sizeof(adaptiveQuality));
 
 	static constexpr float tempF[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 	effect.SetVectorVariable("tempF1", tempF, sizeof(tempF));
@@ -935,7 +938,7 @@ void EffectManager::UpdateCommonVariablesForEffect(Effect& effect)
 	effect.SetVectorVariable("BloomSize", bloomSize, sizeof(bloomSize));
 }
 
-void EffectManager::CopyTexture(ID3D11ShaderResourceView* a_source, ID3D11RenderTargetView* a_dest, bool a_dither)
+bool EffectManager::CopyTexture(ID3D11ShaderResourceView* a_source, ID3D11RenderTargetView* a_dest, bool a_dither)
 {
 	if (!a_source || !a_dest || !copyPixelShader || !copyVertexShader) {
 		static bool logged = false;
@@ -943,7 +946,7 @@ void EffectManager::CopyTexture(ID3D11ShaderResourceView* a_source, ID3D11Render
 			logger::warn("[EFFECTS11] Invalid parameters or shaders not initialized for texture copy");
 			logged = true;
 		}
-		return;
+		return false;
 	}
 
 	auto context = globals::d3d::context;
@@ -954,7 +957,7 @@ void EffectManager::CopyTexture(ID3D11ShaderResourceView* a_source, ID3D11Render
 	winrt::com_ptr<ID3D11Texture2D> texture;
 	if (!resource || !resource.try_as(texture) || !texture) {
 		logger::error("[EFFECTS11] Failed to get Texture2D from destination render target");
-		return;
+		return false;
 	}
 	D3D11_TEXTURE2D_DESC texDesc;
 	texture->GetDesc(&texDesc);
@@ -1014,6 +1017,7 @@ void EffectManager::CopyTexture(ID3D11ShaderResourceView* a_source, ID3D11Render
 	// Clean up SRV binding
 	ID3D11ShaderResourceView* nullSRV = nullptr;
 	context->PSSetShaderResources(0, 1, &nullSRV);
+	return true;
 }
 
 void EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV)
@@ -1084,9 +1088,12 @@ void EffectManager::ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV)
 
 void EffectManager::ReloadShaders()
 {
+	// The Create* helpers also (re)create these buffers through com_ptr::put(), which requires them to be empty
 	copyVertexShader = nullptr;
 	copyPixelShader = nullptr;
+	ditherConstantBuffer = nullptr;
 	colorCorrectionComputeShader = nullptr;
+	colorCorrectionConstantBuffer = nullptr;
 	CreateCopyShaders();
 	CreateColorCorrectionShader();
 }

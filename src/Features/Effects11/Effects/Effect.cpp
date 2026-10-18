@@ -24,6 +24,8 @@ bool Effect::Load()
 
 	if (!std::filesystem::exists(iniPath)) {
 		logger::info("[EFFECTS11] Could not find ini file '{}' for effect '{}', using defaults", iniPath.string(), GetName());
+		// Patches force off preset effects that clash with Community Shaders, so they apply without an ini too
+		Util::SettingsPatches::Apply(*this);
 		CaptureBaseValues();
 		return true;
 	}
@@ -185,7 +187,7 @@ void Effect::Save()
 	std::transform(section.begin(), section.end(), section.begin(), ::toupper);
 
 	for (const auto& uiVar : uiVariables) {
-		if (uiVar.isLabel)
+		if (uiVar.isLabel || uiVar.isPatched)
 			continue;
 		if (!uiVar.effectVariable && !uiVar.isDefine)
 			continue;
@@ -282,6 +284,11 @@ bool Effect::Apply()
 	}
 
 	CreateEffectTextures();
+
+	for (const auto& entry : techniques)
+		for (const auto& info : entry.second)
+			if (!info.renderTargetName.empty() && !effectTextureCache.contains(info.renderTargetName))
+				GetCachedCommonTexture(info.renderTargetName);
 
 	logger::info("[EFFECTS11] Successfully applied effect '{}'", GetName());
 	return true;
@@ -488,6 +495,7 @@ Effect::TechniqueSequenceResult Effect::ExecuteTechniqueSequence(const std::stri
 
 	uint32_t swapCounter = 0;
 	uint32_t passOffset = 0;
+	bool wroteChain = false;
 	bool targetInOutput = false;
 	bool targetInTemp = false;
 
@@ -523,17 +531,22 @@ Effect::TechniqueSequenceResult Effect::ExecuteTechniqueSequence(const std::stri
 			swapCounter++;
 		}
 
-		targetInOutput = (outputRTV == a_output.rtv.get());
-		targetInTemp = (outputRTV == a_temp.rtv.get());
-
 		if (sourceTexture && sourceTexture->IsValid())
 			sourceTexture->AsShaderResource()->SetResource(inputSRV);
 
 		RenderPasses(techniqueInfo.technique.get(), outputRTV, passOffset);
 		passOffset += techniqueInfo.passCount;
+
+		// A technique with a RenderTarget annotation writes a side target and leaves the chain result
+		// where it was. Callers swap textures on this result, so report only chain writes.
+		if (outputRTV == a_output.rtv.get() || outputRTV == a_temp.rtv.get()) {
+			wroteChain = true;
+			targetInOutput = (outputRTV == a_output.rtv.get());
+			targetInTemp = !targetInOutput;
+		}
 	}
 
-	return { true, targetInOutput, targetInTemp };
+	return { wroteChain, targetInOutput, targetInTemp };
 }
 
 void Effect::ExecuteTechnique(const std::string& techniqueName, TextureManager::Texture& output)

@@ -91,7 +91,8 @@ public:
 	struct CommonVariableData
 	{
 		float timer[4];
-		float weather[4];
+		float weather[4];     // x/y = current/outgoing weather form IDs (mod index stripped, location-mapped), z = transition, w = game hour
+		float enbWeather[4];  // ENB SDK "Weather": x/y = [WEATHERnnn] indices of those weathers (0 = not listed), z/w as weather
 		float timeOfDay1[4];
 		float timeOfDay2[4];
 		float eNightDayFactor;
@@ -127,6 +128,8 @@ public:
 
 		uint32_t brightness = 0xFFFFFFFF;
 		uint32_t gammaCurve = 0xFFFFFFFF;
+
+		uint32_t enableRain = 0xFFFFFFFF;
 	} ids;
 
 	const CommonVariableData& GetCommonData() const { return commonData; }
@@ -145,7 +148,8 @@ public:
 	void ExecuteEffect(EffectBase& effect, uint32_t enableSettingID = 0xFFFFFFFF);
 
 	// Texture copy using pixel shader
-	void CopyTexture(ID3D11ShaderResourceView* source, ID3D11RenderTargetView* destination, bool dither = true);
+	/** @return false if nothing was drawn (missing shaders or invalid views). */
+	bool CopyTexture(ID3D11ShaderResourceView* source, ID3D11RenderTargetView* destination, bool dither = true);
 
 	// Color correction using compute shader
 	void ApplyColorCorrection(ID3D11UnorderedAccessView* textureUAV);
@@ -162,7 +166,7 @@ private:
 
 	/** @brief Fills ENB tempInfo1 (cursor position, menu flag, button mask) and tempInfo2 (last left/right click). */
 	void UpdateCursorData();
-	/** @brief Fills ENB LightParameters with the sun's screen UV (xy) and visibility (w). */
+	/** @brief Fills ENB LightParameters with the sun's screen position in NDC (xy, -1..1, y up) and visibility (w). */
 	void UpdateLightParameters();
 	/** @brief True if the effect is compiled and its enable setting (if any) is on. */
 	bool WillEffectRun(EffectBase& effect, uint32_t enableSettingID);
