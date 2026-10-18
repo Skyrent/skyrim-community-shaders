@@ -101,6 +101,7 @@ find_package(pystring CONFIG REQUIRED)
 find_package(cppwinrt CONFIG REQUIRED)
 find_package(unordered_dense CONFIG REQUIRED)
 find_package(efsw CONFIG REQUIRED)
+find_package(xxHash CONFIG REQUIRED)
 find_package(Tracy CONFIG REQUIRED)
 find_package(effects11 CONFIG REQUIRED)
 
@@ -213,6 +214,7 @@ target_link_libraries(
         pystring::pystring
         unordered_dense::unordered_dense
         efsw::efsw
+        xxHash::xxhash
         Tracy::TracyClient
         ${DETOURS_LIBRARY}
         Microsoft::Effects11
@@ -271,15 +273,11 @@ foreach(FEATURE_PATH ${FEATURE_CONFIG_FILES})
     string(STRIP "${CONFIG_VALUE}" CONFIG_VALUE)
     if(CONFIG_VALUE)
         string(
-            REGEX MATCH "[Vv]ersion = ([0-9]+)-([0-9]+)-([0-9]+)"
-            _
+            REGEX MATCH "[Vv]ersion[ \t]*=[ \t]*([0-9]+)-([0-9]+)-([0-9]+)"
+            _VERSION_MATCH
             "${CONFIG_VALUE}"
         )
-        if(
-            DEFINED CMAKE_MATCH_1
-            AND DEFINED CMAKE_MATCH_2
-            AND DEFINED CMAKE_MATCH_3
-        )
+        if(_VERSION_MATCH)
             set(ver_major ${CMAKE_MATCH_1})
             set(ver_minor ${CMAKE_MATCH_2})
             set(ver_patch ${CMAKE_MATCH_3})
@@ -1175,6 +1173,8 @@ find_program(SEVENZ_EXECUTABLE NAMES 7z 7za
     PATHS "C:/Program Files/7-Zip" "C:/Program Files (x86)/7-Zip"
     DOC "7-Zip archiver for compressed packages"
 )
+# The Vulkan AIO carries DXVK and Streamline: maximum compression keeps it within the upload limits.
+set(SEVENZ_AIO_ARGS a -t7z -mx=9 -m0=lzma2 -md=128m -mfb=273 -ms=on -mmt=on -bd -y)
 
 # Zip base CommunityShaders and all addons as their own zip in dist folder
 if(ZIP_TO_DIST)
@@ -1274,20 +1274,29 @@ if(AIO_ZIP_TO_DIST)
 
     message("Compressing ${AIO_DIR} to ${AIO_ARCHIVE}")
 
-    add_custom_command(
-        OUTPUT ${AIO_ZIP_STAMP}
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/dist"
-        COMMAND ${CMAKE_COMMAND} -E rm -f "${AIO_ARCHIVE}"
-        COMMAND
-            "${SEVENZ_EXECUTABLE}" a -t7z "${AIO_ARCHIVE}" "*"
-            -mx=9 -m0=lzma2 -md=128m -mfb=273 -ms=on -mmt=on -bd -y
-        COMMAND ${CMAKE_COMMAND} -E touch ${AIO_ZIP_STAMP}
-        WORKING_DIRECTORY ${AIO_DIR}
-        DEPENDS
-            ${CMAKE_CURRENT_BINARY_DIR}/prepare_aio.stamp
-            ${CMAKE_CURRENT_BINARY_DIR}/copy_shaders.stamp
-        COMMENT "Creating maximum-compression AIO archive ${AIO_ARCHIVE}"
-    )
+    if(SEVENZ_EXECUTABLE)
+        add_custom_command(
+            OUTPUT ${AIO_ZIP_STAMP}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/dist"
+            COMMAND ${CMAKE_COMMAND} -E rm -f "${AIO_ARCHIVE}"
+            COMMAND "${SEVENZ_EXECUTABLE}" ${SEVENZ_AIO_ARGS} "${AIO_ARCHIVE}" *
+            COMMAND ${CMAKE_COMMAND} -E touch ${AIO_ZIP_STAMP}
+            WORKING_DIRECTORY ${AIO_DIR}
+            DEPENDS PREPARE_AIO ${CMAKE_CURRENT_BINARY_DIR}/copy_shaders.stamp
+            COMMENT "Creating AIO archive ${AIO_ARCHIVE}"
+        )
+    else()
+        message(WARNING "7z not found; AIO archive will use uncompressed zip")
+        add_custom_command(
+            OUTPUT ${AIO_ZIP_STAMP}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/dist"
+            COMMAND ${CMAKE_COMMAND} -E tar cf ${AIO_ARCHIVE} --format=zip -- .
+            COMMAND ${CMAKE_COMMAND} -E touch ${AIO_ZIP_STAMP}
+            WORKING_DIRECTORY ${AIO_DIR}
+            DEPENDS PREPARE_AIO ${CMAKE_CURRENT_BINARY_DIR}/copy_shaders.stamp
+            COMMENT "Creating AIO archive ${AIO_ARCHIVE}"
+        )
+    endif()
 
     add_custom_target(AIO_ZIP_PACKAGE ALL DEPENDS ${AIO_ZIP_STAMP})
 endif()
@@ -1406,9 +1415,7 @@ if(TARGET PREPARE_AIO)
             OUTPUT ${AIO_PACKAGE}
             COMMAND ${CMAKE_COMMAND} -E make_directory "${DIST_PATH}"
             COMMAND ${CMAKE_COMMAND} -E rm -f "${AIO_PACKAGE}"
-            COMMAND
-                "${SEVENZ_EXECUTABLE}" a -t7z "${AIO_PACKAGE}" "*"
-                -mx=9 -m0=lzma2 -md=128m -mfb=273 -ms=on -mmt=on -bd -y
+            COMMAND "${SEVENZ_EXECUTABLE}" ${SEVENZ_AIO_ARGS} "${AIO_PACKAGE}" *
             WORKING_DIRECTORY ${AIO_DIR}
             DEPENDS
                 ${CMAKE_CURRENT_BINARY_DIR}/prepare_aio.stamp
@@ -1430,35 +1437,28 @@ if(TARGET PREPARE_AIO)
         )
     endif()
 else()
+    # AIO_PACKAGE is named .7z whenever 7-Zip exists, so this branch must honour
+    # SEVENZ_EXECUTABLE too or it emits a deflate zip wearing a .7z extension.
     if(SEVENZ_EXECUTABLE)
-        add_custom_command(
-            OUTPUT ${AIO_PACKAGE}
-            DEPENDS ${PROJECT_NAME} ${CORE_SOURCES} ${_AIO_RUNTIME_INPUTS}
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${AIO_DIR}
-            COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --config $<CONFIG> --prefix ${AIO_DIR}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${DIST_PATH}"
-            COMMAND ${CMAKE_COMMAND} -E rm -f "${AIO_PACKAGE}"
-            COMMAND
-                ${CMAKE_COMMAND} -E chdir ${AIO_DIR} "${SEVENZ_EXECUTABLE}" a -t7z
-                "${AIO_PACKAGE}" "*" -mx=9 -m0=lzma2 -md=128m -mfb=273 -ms=on -mmt=on -bd -y
-            COMMENT "Creating maximum-compression AIO package (full install)"
-            VERBATIM
+        set(AIO_ARCHIVE_COMMAND
+            "${SEVENZ_EXECUTABLE}" ${SEVENZ_AIO_ARGS} "${AIO_PACKAGE}" *
         )
     else()
-        add_custom_command(
-            OUTPUT ${AIO_PACKAGE}
-            DEPENDS ${PROJECT_NAME} ${CORE_SOURCES} ${_AIO_RUNTIME_INPUTS}
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${AIO_DIR}
-            COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --config $<CONFIG> --prefix ${AIO_DIR}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${DIST_PATH}"
-            COMMAND ${CMAKE_COMMAND} -E rm -f "${AIO_PACKAGE}"
-            COMMAND
-                ${CMAKE_COMMAND} -E chdir ${AIO_DIR} ${CMAKE_COMMAND} -E tar cfv
-                ${AIO_PACKAGE} --format=zip -- .
-            COMMENT "Creating fallback AIO zip package (full install)"
-            VERBATIM
+        set(AIO_ARCHIVE_COMMAND
+            ${CMAKE_COMMAND} -E tar cfv ${AIO_PACKAGE} --format=zip -- .
         )
     endif()
+    add_custom_command(
+        OUTPUT ${AIO_PACKAGE}
+        DEPENDS ${PROJECT_NAME} ${CORE_SOURCES} ${_AIO_RUNTIME_INPUTS}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${AIO_DIR}
+        COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --config $<CONFIG> --prefix ${AIO_DIR}
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${DIST_PATH}"
+        COMMAND ${CMAKE_COMMAND} -E rm -f "${AIO_PACKAGE}"
+        COMMAND ${CMAKE_COMMAND} -E chdir ${AIO_DIR} ${AIO_ARCHIVE_COMMAND}
+        COMMENT "Creating AIO archive (full install)"
+        VERBATIM
+    )
 endif()
 add_custom_target("Package-AIO-Manual" DEPENDS ${AIO_PACKAGE})
 

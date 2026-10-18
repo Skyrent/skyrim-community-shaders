@@ -499,7 +499,14 @@ void HDRDisplay::DrawSettings()
 			ImGui::TextUnformatted(T(TKEY("paper_white_tooltip_1"), "203 nits is the ITU BT.2408 reference. Increase for a brighter image."));
 		}
 
-		ImGui::SliderInt(T(TKEY("peak_brightness_nits"), "Peak Brightness (nits)"), reinterpret_cast<int*>(&currentPeakNits), 400, 10000);
+		// Under AutoHDR, show the capped range without overwriting the stored native peak unless edited
+		const bool autoHDRActive = globals::features::effects11.ReplacedTonemapperThisFrame();
+		const uint peakSliderMax = autoHDRActive ? kAutoHDRMaxNits : kHdrPeakNitsMax;
+		int displayedPeakNits = static_cast<int>(std::min(currentPeakNits, peakSliderMax));
+		// Logarithmic spreads the common 600-1000 nit range across more of the native slider
+		if (ImGui::SliderInt(T(TKEY("peak_brightness_nits"), "Peak Brightness (nits)"), &displayedPeakNits, kHdrPeakNitsMin, peakSliderMax, "%d",
+				autoHDRActive ? ImGuiSliderFlags_None : ImGuiSliderFlags_Logarithmic))
+			currentPeakNits = static_cast<uint>(displayedPeakNits);
 		{
 			std::lock_guard<std::mutex> lock(settingsMutex);
 			if (currentPeakNits <= settings.hdrPaperWhite) {
@@ -514,6 +521,9 @@ void HDRDisplay::DrawSettings()
 			ImGui::TextUnformatted(T(TKEY("peak_brightness_tooltip_0"), "Maximum brightness your display can produce."));
 			ImGui::TextUnformatted(T(TKEY("peak_brightness_tooltip_1"), "Set to match your display's actual peak brightness."));
 		}
+
+		if (autoHDRActive)
+			Util::Text::WrappedWarning(T(TKEY("auto_hdr_peak_cap"), "Effects11 AutoHDR is active: peak brightness is capped at %u nits."), kAutoHDRMaxNits);
 
 		if (!cachedDisplayLuminanceValid) {
 			ImGui::TextDisabled("%s", T(TKEY("display_reports_unavailable"), "Display luminance: not reported by the driver"));
@@ -1476,11 +1486,14 @@ HDRDisplay::HDRDataCB HDRDisplay::BuildHDRData() const
 {
 	bool isMainOrLoadingMenu = globals::state->IsMainOrLoadingMenuOpen();
 	// Linear Lighting keeps the pipeline linear throughout.
-	// Without it, ISHDR gamma-encodes its output even in HDR mode. Linear Lighting stands down on the flat world map.
-	bool isSceneLinear = globals::features::linearLighting.settings.enableLinearLighting && !globals::state->IsFlatWorldMapOpen();
+	// Without it, ISHDR gamma-encodes its output even in HDR mode. Linear Lighting stands down on the flat world map
+	// and whenever Effects11 is on (LinearLighting::GetCommonBufferData).
+	auto& effects11 = globals::features::effects11;
+	bool isSceneLinear = globals::features::linearLighting.settings.enableLinearLighting && !globals::state->IsFlatWorldMapOpen() &&
+	                     !(effects11.loaded && effects11.enableEffect);
 
-	// Use user-specified peak brightness for highlights compression
-	float effectivePeakNits = static_cast<float>(settings.hdrPeakNits);
+	const bool applyAutoHDR = effects11.ReplacedTonemapperThisFrame();
+	float effectivePeakNits = static_cast<float>(applyAutoHDR ? std::min(settings.hdrPeakNits, kAutoHDRMaxNits) : settings.hdrPeakNits);
 
 	HDRDataCB data{};
 	data.enableHDR = IsHDREnabledForFrame() ? 1.f : 0.f;
@@ -1491,7 +1504,7 @@ HDRDisplay::HDRDataCB HDRDisplay::BuildHDRData() const
 	data.isSceneLinear = isSceneLinear ? 1.f : 0.f;
 	data.isMainOrLoadingMenu = isMainOrLoadingMenu ? 1.f : 0.f;
 	data.previewSDR = 0.f;
-	data.applyAutoHDR = globals::features::effects11.ReplacedTonemapperThisFrame() ? 1.f : 0.f;
+	data.applyAutoHDR = applyAutoHDR ? 1.f : 0.f;
 	return data;
 }
 
