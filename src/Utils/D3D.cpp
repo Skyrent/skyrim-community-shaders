@@ -5,6 +5,7 @@
 #include "Features/TerrainBlending.h"
 #include "ShaderCache.h"
 #include "State.h"
+#include "Utils/FileRename.h"
 #include "Utils/Format.h"
 #include <DDSTextureLoader.h>
 #include <DirectXTex.h>
@@ -622,7 +623,7 @@ namespace Util
 			return hr;
 		}
 
-		fs::rename(tmp, path, ec);
+		Util::RenameSerialized(tmp, path, ec);
 		if (ec) {
 			fs::remove(path, ec);
 			if (ec) {
@@ -630,7 +631,7 @@ namespace Util
 				fs::remove(tmp);
 				return HRESULT_FROM_WIN32(static_cast<DWORD>(ec.value()));
 			}
-			fs::rename(tmp, path, ec);
+			Util::RenameSerialized(tmp, path, ec);
 			if (ec) {
 				logger::error("SaveTextureToFile: failed to rename file");
 				fs::remove(tmp);
