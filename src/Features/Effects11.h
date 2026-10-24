@@ -17,7 +17,7 @@ public:
 	virtual inline std::string GetDisplayName() override { return "Effects 11"; }
 	virtual std::string_view GetCategory() const override { return "Post-Processing"; }
 	virtual inline std::string_view GetShaderDefineName() override { return "EFFECTS11"; }
-	virtual inline bool HasShaderDefine(RE::BSShader::Type) override { return true; }
+	bool HasShaderDefine(RE::BSShader::Type) override;
 
 	virtual std::pair<std::string, std::vector<std::string>> GetFeatureSummary() override
 	{
@@ -217,11 +217,15 @@ public:
 
 	virtual void DrawSettings() override;
 	virtual void SetupResources() override;
+	virtual void PostSetupResources() override;
+	virtual void Reset() override;
 	virtual void Prepass() override;
 	virtual void ClearShaderCache() override;
 
 	/** @brief Flips the "UseEffect" GLOBAL setting; bound to the Effects 11 toggle hotkey. */
 	void ToggleEnabled();
+	bool IsPresetEnabled() const;
+	bool IsActive() const { return presetActive; }
 
 	void DrawVolumetricRays();
 
@@ -240,19 +244,36 @@ public:
 	void OverrideAmbientLighting(DirectionalAmbientColors& DirectionalAmbientColors);
 
 	void ModifySky(RE::BSRenderPass* Pass);
-	bool HandleTonemapRender(RE::RENDER_TARGET a_input, RE::RENDER_TARGET a_output);
-	/** @brief Clears the tonemap replacement state at the start of a rendered frame. */
-	void BeginRenderFrame();
-	/** @brief True when the effect chain replaced ISHDR this frame, leaving an SDR scene for HDR Display to expand. */
+	/**
+	 * @brief Whether Effects11 wants to replace the vanilla tonemap this frame.
+	 *
+	 * Queried by State::GetTonemapOwner() to arbitrate against Post Processing. Does not
+	 * render anything; refreshes per-frame common data as a side effect.
+	 */
+	bool WantsTonemapOwnership();
+
+	/**
+	 * @brief Runs the ENB effect chain in place of the vanilla tonemap pass.
+	 * @param a_input Render target holding the scene color to tonemap.
+	 * @param a_output Render target receiving the tonemapped result.
+	 * @return True only if the chain wrote the output; false means the caller must fall
+	 *         back to the vanilla pass.
+	 */
+	bool RenderTonemap(RE::RENDER_TARGET a_input, RE::RENDER_TARGET a_output);
+
+	/** @brief True when the effect chain replaced ISHDR for the frame being presented, leaving an SDR scene for HDR Display to expand. */
 	bool ReplacedTonemapperThisFrame() const;
 
 private:
+	bool presetActive = false;
+	bool resourcesReady = false;
 	/** @brief Creates the additive blend state shared by the ray passes on first use; false if creation failed. */
 	bool EnsureAdditiveBlendState();
 	/** @brief Compiles the sun ray shaders and (re)creates their half-res targets; false if anything failed. */
 	bool EnsureSunRaysResources(uint32_t a_width, uint32_t a_height);
 
-	bool tonemapReplacedThisFrame = false;  ///< Set when the effect chain writes the tonemap output during this render frame
+	uint tonemapReplacedFrame = UINT32_MAX;  ///< frameCount at which the effect chain's last tonemap output gets presented
+
 	/** @brief Point light settings, resolved once per frame in CheckCommonData since OverridePointLightColor runs per light. */
 	struct PointLightingParams
 	{

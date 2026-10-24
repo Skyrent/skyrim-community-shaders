@@ -20,6 +20,8 @@
 #include <format>
 #include <nlohmann/json.hpp>
 
+#include "Features/PostProcessing.h"
+
 #define I18N_KEY_PREFIX "feature.upscaling."
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(
@@ -1892,11 +1894,24 @@ void Upscaling::MenuManagerDrawInterfaceStartHook::thunk(int64_t a1)
 
 void Upscaling::Main_PostProcessing::thunk(RE::ImageSpaceManager* a_this, uint32_t a3, RE::RENDER_TARGET a_target, void* a_4, bool a_5)
 {
+	auto& postProcessing = globals::features::postProcessing;
+	if (postProcessing.loaded) {
+		postProcessing.DrawBeforeUpscaling();
+	}
+
 	auto& upscaling = globals::features::upscaling;
 	auto upscaleMethod = upscaling.GetUpscaleMethod();
 
 	// Keep markers, evaluation, tagging, and present on the same usable-window frame.
 	const bool windowUsable = !Upscaling::IsWindowUnusable();
+
+	// Post Processing's letterbox: its band's motion vectors are zeroed before frame generation reads them (upstream #2354; the
+	// generation is DXVK's on Vulkan, which tags them after this point).
+	if (windowUsable && upscaling.IsFrameGenerationActive()) {
+		auto& postProcessing = globals::features::postProcessing;
+		if (postProcessing.loaded)
+			postProcessing.ClearBorderMotionVectorsForFrameGen();
+	}
 
 	auto* streamline = Streamline::GetSingleton();
 	if (windowUsable && upscaling.GetEffectiveReflex()) {

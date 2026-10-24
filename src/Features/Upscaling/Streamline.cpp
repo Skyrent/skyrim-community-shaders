@@ -859,7 +859,8 @@ static bool cs_BuildConstants(sl::Constants& a_consts, uint32_t a_outputWidth, u
 	const auto& posAdj = globals::game::frameBufferCached.GetCameraPosAdjust();
 	const auto& prevPosAdj = globals::game::frameBufferCached.GetCameraPreviousPosAdjust();
 	Matrix camDelta = Matrix::CreateTranslation(posAdj.x - prevPosAdj.x, posAdj.y - prevPosAdj.y, posAdj.z - prevPosAdj.z);
-	a_consts.reset = sl::Boolean::eFalse;
+	// A camera cut or load (State::RequestHistoryReset, upstream #2354) resets the history.
+	a_consts.reset = globals::state->ShouldResetHistory() ? sl::Boolean::eTrue : sl::Boolean::eFalse;
 	Matrix clipToPrevClip = curVP.Invert() * camDelta * prevVP;
 	Matrix prevClipToClip = clipToPrevClip.Invert();
 

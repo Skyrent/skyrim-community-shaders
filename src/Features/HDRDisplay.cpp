@@ -9,6 +9,7 @@
 #include "LinearLighting.h"
 #include "Menu.h"
 #include "Utils/VersionedRelocation.h"
+#include "ScreenshotFeature.h"
 #include "ShaderCache.h"
 #include "State.h"
 #include "Upscaling.h"
@@ -414,11 +415,9 @@ void HDRDisplay::DrawSettings()
 		};
 		const char* forceEnableLabel = T(TKEY("force_enable_hdr"), "Force Enable HDR");
 		const char* cancelLabel = T(TKEY("cancel"), "Cancel");
-		const float buttonWidth = std::max({
-			ThemeManager::Constants::POPUP_BUTTON_WIDTH * Util::GetUIScale(),
+		const float buttonWidth = std::max({ ThemeManager::Constants::POPUP_BUTTON_WIDTH * Util::GetUIScale(),
 			buttonWidthForLabel(forceEnableLabel),
-			buttonWidthForLabel(cancelLabel)
-		});
+			buttonWidthForLabel(cancelLabel) });
 
 		if (ImGui::Button(forceEnableLabel, ImVec2(buttonWidth, 0))) {
 			{
@@ -746,7 +745,6 @@ void HDRDisplay::SetupResources()
 void HDRDisplay::BeginRenderFrame()
 {
 	DXVKInterop::GetSingleton()->CommitPresenterSurfaceStateForRenderFrame();
-	globals::features::effects11.BeginRenderFrame();
 
 	bool requestedHDR;
 	{
@@ -870,6 +868,8 @@ namespace
 			if (globals::features::hdrDisplay.IsPresentSuppressed())
 				return S_OK;
 
+			globals::features::screenshotFeature.ProcessCaptureRequest();
+
 			return func(This, SyncInterval, Flags);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
@@ -954,6 +954,7 @@ ID3D11BlendState* HDRDisplay::GetPatchedAlphaBlendState(ID3D11BlendState* origin
 
 HRESULT HDRDisplay::PresentToSwapChain(IDXGISwapChain* swapChain, UINT syncInterval, UINT flags)
 {
+	globals::features::screenshotFeature.ProcessCaptureRequest();
 	return SwapChainPresentBottom::func(swapChain, syncInterval, flags);
 }
 
@@ -1491,13 +1492,10 @@ HDRDisplay::HDRDataCB HDRDisplay::BuildHDRData() const
 {
 	bool isMainOrLoadingMenu = globals::state->IsMainOrLoadingMenuOpen();
 	// Linear Lighting keeps the pipeline linear throughout.
-	// Without it, ISHDR gamma-encodes its output even in HDR mode. Linear Lighting stands down on the flat world map
-	// and whenever Effects11 is on (LinearLighting::GetCommonBufferData).
-	auto& effects11 = globals::features::effects11;
-	bool isSceneLinear = globals::features::linearLighting.settings.enableLinearLighting && !globals::state->IsFlatWorldMapOpen() &&
-	                     !(effects11.loaded && effects11.enableEffect);
+	// Without it, ISHDR gamma-encodes its output even in HDR mode.
+	bool isSceneLinear = globals::features::linearLighting.IsLinearLightingActive() && !isMainOrLoadingMenu && !globals::state->IsFlatWorldMapOpen();
 
-	const bool applyAutoHDR = effects11.ReplacedTonemapperThisFrame();
+	const bool applyAutoHDR = globals::features::effects11.ReplacedTonemapperThisFrame();
 	float effectivePeakNits = static_cast<float>(applyAutoHDR ? std::min(settings.hdrPeakNits, kAutoHDRMaxNits) : settings.hdrPeakNits);
 
 	HDRDataCB data{};
