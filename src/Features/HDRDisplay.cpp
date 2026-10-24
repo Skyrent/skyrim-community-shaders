@@ -9,6 +9,7 @@
 #include "LinearLighting.h"
 #include "Menu.h"
 #include "Utils/VersionedRelocation.h"
+#include "PostProcessing.h"
 #include "ScreenshotFeature.h"
 #include "ShaderCache.h"
 #include "State.h"
@@ -1507,7 +1508,8 @@ HDRDisplay::HDRDataCB HDRDisplay::BuildHDRData() const
 	data.isSceneLinear = isSceneLinear ? 1.f : 0.f;
 	data.isMainOrLoadingMenu = isMainOrLoadingMenu ? 1.f : 0.f;
 	data.previewSDR = 0.f;
-	data.applyAutoHDR = applyAutoHDR ? 1.f : 0.f;
+	// Effects11 ENB presets are SDR; Jiaye SDR-only tonemappers opt in via Color Grading AutoHDR.
+	data.applyAutoHDR = (applyAutoHDR || globals::features::postProcessing.WantsAutoHDR()) ? 1.f : 0.f;
 	return data;
 }
 
