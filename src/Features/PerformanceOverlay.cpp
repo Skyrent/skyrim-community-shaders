@@ -353,7 +353,7 @@ void PerformanceOverlay::DrawOverlay()
 	}
 
 	// Create the window
-	Util::BeginWithRoundedClose(T(TKEY("overlay_title"), "Performance Overlay"), nullptr, windowFlags);
+	Util::BeginWithRoundedClose(std::format("{}{}", T(TKEY("overlay_title"), "Performance Overlay"), kWindowId).c_str(), nullptr, windowFlags);
 
 	// Remember window position for next frame
 	if (ImGui::IsWindowAppearing()) {
@@ -1944,22 +1944,22 @@ void PerformanceOverlay::UpdateMetrics()
 	                  static_cast<float>(state.overlayTimingFrequency.QuadPart);
 	state.lastUpdateTime = now;
 
-	if (!state.graphSampleGate.ShouldSample())
-		return;
+	const bool sampleGraph = state.graphSampleGate.ShouldSample();
 
-	// Insert latest frame time into circular buffer
-	float oldFrameTime = state.frameTimeHistory.GetData()[state.frameTimeHistory.GetHeadIdx()];  // what is the point of oldFrameTime?
-	state.frameTimeHistory.Push(state.frameTimeMs);
+	if (sampleGraph) {
+		const float oldFrameTime = state.frameTimeHistory.GetData()[state.frameTimeHistory.GetHeadIdx()];
+		state.frameTimeHistory.Push(state.frameTimeMs);
 
-	// Maintain instantaneous min/max tracking
-	if (state.frameTimeMs > state.maxFrameTime) {
-		state.maxFrameTime = state.frameTimeMs;
-	} else if (state.frameTimeMs < state.minFrameTime) {
-		state.minFrameTime = state.frameTimeMs;
-	} else if (oldFrameTime == state.minFrameTime) {
-		state.minFrameTime = *std::ranges::min_element(state.frameTimeHistory.GetData());
-	} else if (oldFrameTime == state.maxFrameTime) {
-		state.maxFrameTime = *std::ranges::max_element(state.frameTimeHistory.GetData());
+		// Maintain instantaneous min/max tracking
+		if (state.frameTimeMs > state.maxFrameTime) {
+			state.maxFrameTime = state.frameTimeMs;
+		} else if (state.frameTimeMs < state.minFrameTime) {
+			state.minFrameTime = state.frameTimeMs;
+		} else if (oldFrameTime == state.minFrameTime) {
+			state.minFrameTime = *std::ranges::min_element(state.frameTimeHistory.GetData());
+		} else if (oldFrameTime == state.maxFrameTime) {
+			state.maxFrameTime = *std::ranges::max_element(state.frameTimeHistory.GetData());
+		}
 	}
 
 	float avgFrameTime = kDefaultFrameTimeMs,
