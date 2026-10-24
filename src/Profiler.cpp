@@ -64,6 +64,7 @@ void Profiler::Initialize(ID3D11Device* device, ID3D11DeviceContext* a_context)
 			}
 		}
 		frame.activeCount = 0;
+		frame.inFlight = false;
 	}
 
 	// DXVK's timestamp queries are written at ALL_COMMANDS, so a pair inside one submission measures just
@@ -92,6 +93,7 @@ void Profiler::Release()
 		frame.disjoint = nullptr;
 		frame.timers.clear();
 		frame.activeCount = 0;
+		frame.inFlight = false;
 	}
 	results.clear();
 	knownTimers.clear();
@@ -106,7 +108,7 @@ void Profiler::Release()
 
 void Profiler::BeginFrame()
 {
-	if (!initialized || !context || frameActive || frameSkipped)
+	if (!initialized || !context || frameActive)
 		return;
 
 	CollectResults();
@@ -131,8 +133,6 @@ void Profiler::BeginPass(const std::string& name)
 
 	if (!frameActive)
 		BeginFrame();
-	if (!frameActive)
-		return;
 
 	auto& frame = frames[writeFrame];
 	if (frameSkipped || frame.activeCount >= kMaxTimers) {
@@ -186,14 +186,7 @@ void Profiler::AddExternalSample(std::string_view a_name, float a_gpuMs)
 
 void Profiler::EndFrame()
 {
-	if (!initialized || !context)
-		return;
-
-	if (frameSkipped) {
-		frameSkipped = false;
-		return;
-	}
-	if (!frameActive)
+	if (!initialized || !context || !frameActive)
 		return;
 
 	frameActive = false;

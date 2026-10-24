@@ -119,7 +119,7 @@ public:
 		endPerfEvent = std::move(endCb);
 	}
 
-	/** @brief Collects resolved frames; begins one unless the ring is full. */
+	/** @brief Begins a new profiling frame; collects results from the oldest in-flight frame. */
 	void BeginFrame();
 
 	/**
@@ -202,6 +202,7 @@ private:
 		};
 		std::vector<TimerPair> timers;
 		uint32_t activeCount = 0;
+		bool inFlight = false;
 	};
 
 	ID3D11DeviceContext* context = nullptr;
