@@ -42,6 +42,11 @@ struct ScreenshotFeature : public Feature
 	void Capture();
 	/** @brief Hands finished GPU readbacks to the worker, then executes Capture() if one is pending. Render thread only; call before the wrapped buffers are cleared. */
 	void ProcessCaptureRequest();
+	/**
+	 * @brief Any thread: the next Present's back buffer saved to a_outputPath (its extension replaced by the format's), for scripted
+	 * runs that must tie a capture to a frame (DCLF's test harness, dclf:shot=).
+	 */
+	void RequestCapture(std::filesystem::path a_outputPath);
 	bool applyCropToScreenshot = true;
 
 	// Settings
@@ -70,6 +75,7 @@ private:
 		bool saveAsSdrPng = false;
 		int hdrPngBitDepth = 11;
 		bool copyToClipboard = false;
+		bool notify = true;  // the in-game "saved" message (not for RequestCapture's)
 	};
 
 	std::mutex screenshotQueueMutex;
@@ -80,6 +86,10 @@ private:
 	// Render thread only: the worker never touches the immediate context.
 	std::vector<PendingScreenshot> pendingReadbacks;
 	Util::Subrect::Controller subrect;
+	// RequestCapture's paths, taken in order by the next Presents (one a Present); empty: the user's capture, named by time.
+	std::mutex requestedPathsMutex;
+	std::queue<std::filesystem::path> requestedPaths;
+	std::filesystem::path captureOutputPath;  // render thread: the path Capture() saves to (empty: BuildScreenshotPath)
 
 	// SRV-readable copy used when the capture source's own SRV can't be sampled
 	// directly (kFRAMEBUFFER on flat aliases the swap-chain backbuffer).

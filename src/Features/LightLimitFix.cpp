@@ -252,8 +252,8 @@ void LightLimitFix::SetupResources()
 		clusterBuildingCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\LightLimitFix\\ClusterBuildingCS.hlsl", clusterDefines, "cs_5_0");
 		clusterCullingCS = (ID3D11ComputeShader*)Util::CompileShader(L"Data\\Shaders\\LightLimitFix\\ClusterCullingCS.hlsl", clusterDefines, "cs_5_0");
 
-		lightBuildingCB = new ConstantBuffer(ConstantBufferDesc<LightBuildingCB>());
-		lightCullingCB = new ConstantBuffer(ConstantBufferDesc<LightCullingCB>());
+		lightBuildingCB = new ConstantBuffer(ConstantBufferDesc<LightBuildingCB>(), "LLF::LightBuildingCB");
+		lightCullingCB = new ConstantBuffer(ConstantBufferDesc<LightCullingCB>(), "LLF::LightCullingCB");
 	}
 
 	{
@@ -335,7 +335,7 @@ void LightLimitFix::SetupResources()
 	}
 
 	{
-		strictLightDataCB = new ConstantBuffer(ConstantBufferDesc<StrictLightDataCB>());
+		strictLightDataCB = new ConstantBuffer(ConstantBufferDesc<StrictLightDataCB>(), "LLF::StrictLightDataCB");
 	}
 }
 
@@ -520,19 +520,24 @@ void LightLimitFix::Prepass()
 	state->BeginPerfEvent("LightLimitFix Prepass");
 	UpdateLights();
 
-	ID3D11ShaderResourceView* views[3]{};
-	views[0] = lights->srv.get();
-	if (orgCulledThisFrame) {
-		auto& orgCulling = ORGLightCulling::Get();
-		views[1] = orgCulling.GetLightIndexListSRV();
-		views[2] = orgCulling.GetLightGridSRV();
-	} else {
-		views[1] = lightIndexList->srv.get();
-		views[2] = lightGrid->srv.get();
-	}
+	ID3D11ShaderResourceView* views[3]{ lights->srv.get(), GetLightIndexListSRV(), GetLightGridSRV() };
 	context->PSSetShaderResources(35, ARRAYSIZE(views), views);
 
 	state->EndPerfEvent();
+}
+
+ID3D11ShaderResourceView* LightLimitFix::GetLightIndexListSRV() const
+{
+	if (orgCulledThisFrame)
+		return ORGLightCulling::Get().GetLightIndexListSRV();
+	return lightIndexList ? lightIndexList->srv.get() : nullptr;
+}
+
+ID3D11ShaderResourceView* LightLimitFix::GetLightGridSRV() const
+{
+	if (orgCulledThisFrame)
+		return ORGLightCulling::Get().GetLightGridSRV();
+	return lightGrid ? lightGrid->srv.get() : nullptr;
 }
 
 bool LightLimitFix::IsValidLight(RE::BSLight* a_light)

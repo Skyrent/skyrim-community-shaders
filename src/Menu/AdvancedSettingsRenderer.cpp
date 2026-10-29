@@ -829,7 +829,7 @@ void AdvancedSettingsRenderer::RenderDeveloperSection()
 		if (Vram::Debug::Enabled())
 			ImGui::TextUnformatted(T("menu.advanced.vram_debug_on", "VRAM debug mode is on"));
 		else
-			ImGui::TextDisabled("%s", T("menu.advanced.vram_debug_off", "Set CS_VRAM_DEBUG=1 and restart to trace unattributed memory"));
+			ImGui::TextDisabled("%s", T("menu.advanced.vram_debug_off", "Set CS_VRAM_DEBUG=1 and restart to list the render graph's device memory by call site"));
 
 		ImGui::Spacing();
 		// Test Conditions button - runs a set of console commands to prepare the player for testing

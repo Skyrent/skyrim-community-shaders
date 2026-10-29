@@ -24,6 +24,7 @@
 #include "ShaderCache.h"
 #include "State.h"
 #include "Util.h"
+#include "Vram/DxvkMemory.h"
 
 #include "Features/PerformanceOverlay.h"
 #include "Features/PerformanceOverlay/ABTesting/ABTesting.h"
@@ -453,6 +454,8 @@ void OverlayRenderer::FinalizeImGuiFrame()
 
 	{
 		ZoneScopedN("CS.Present.Overlay.RenderDrawData");
+		// The backend grows its vertex and index buffers, and uploads font atlas pages, here.
+		Vram::OwnerScope vramScope("CS/Menu");
 		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 	}
 }

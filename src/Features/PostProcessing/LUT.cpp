@@ -194,6 +194,7 @@ void LUT::ReadTexture(std::string requestedPath)
 		ID3D11ShaderResourceView* pSrv = nullptr;
 		try {
 			DX::ThrowIfFailed(DirectX::CreateDDSTextureFromFile(device, path.c_str(), &pRsrc, &pSrv));
+			Util::SetResourceName(pRsrc, "PostProcessing::LUT");
 		} catch (std::runtime_error& e) {
 			errMsg = std::format(comErrMsg, e.what());
 			logger::warn(comErrMsg, e.what());
@@ -228,6 +229,7 @@ void LUT::ReadTexture(std::string requestedPath)
 		ID3D11Resource* pRsrc = nullptr;
 		try {
 			DX::ThrowIfFailed(CreateTexture(device, image.GetImages(), image.GetImageCount(), image.GetMetadata(), &pRsrc));
+			Util::SetResourceName(pRsrc, "PostProcessing::LUT");
 		} catch (std::runtime_error& e) {
 			errMsg = std::format(comErrMsg, e.what());
 			logger::warn(comErrMsg, e.what());
