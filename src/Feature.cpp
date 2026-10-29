@@ -42,6 +42,7 @@
 #include "Features/Upscaling.h"
 #include "Features/VolumetricLighting.h"
 #include "Features/VolumetricShadows.h"
+#include "Features/VRAMBudget.h"
 #include "Features/WaterEffects.h"
 #include "Features/WetnessEffects.h"
 #include "I18n/I18n.h"
@@ -279,6 +280,7 @@ const std::vector<Feature*>& Feature::GetFeatureList()
 		&globals::features::rainRefraction,
 		&globals::features::unifiedWater,
 		&globals::features::horizonFix,
+		&globals::features::vramBudget,
 		&globals::features::exponentialHeightFog,
 		&globals::features::hdrDisplay,
 		&globals::features::skin,
