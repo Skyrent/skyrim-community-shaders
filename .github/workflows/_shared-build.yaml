@@ -61,9 +61,33 @@ jobs:
               with:
                   ref: ${{ inputs.ref }}
                   repository: ${{ inputs.repository }}
-                  submodules: recursive
+                  submodules: false
                   persist-credentials: false
                   allow-unsafe-pr-checkout: ${{ github.event_name == 'pull_request_target' }}
+
+            # The pinned BasicRHI commit can be missing on its remote ("not our ref"), which makes
+            # submodules: recursive abort the whole checkout. Init everything else normally and fall
+            # back to the remote branch tip for BasicRHI only.
+            - name: Init submodules (BasicRHI falls back to remote tip)
+              shell: pwsh
+              run: |
+                  git config --global 'url."https://github.com/".insteadOf' 'git@github.com:'
+                  git config --global --add 'url."https://github.com/".insteadOf' 'ssh://git@github.com/'
+                  git submodule sync --recursive
+                  $paths = @(git config --file .gitmodules --get-regexp '^submodule\..*\.path$' | ForEach-Object { ($_ -split '\s+', 2)[1] })
+                  foreach ($p in $paths) {
+                    if ($p -eq 'extern/BasicRHI') { continue }
+                    git submodule update --init --force --recursive --depth 1 -- $p
+                    if ($LASTEXITCODE -ne 0) { throw "Submodule failed: $p" }
+                  }
+                  git submodule update --init --force --depth 1 -- extern/BasicRHI
+                  if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "Pinned BasicRHI commit not available: using the remote branch tip instead"
+                    git submodule update --init --force --depth 1 --remote -- extern/BasicRHI
+                    if ($LASTEXITCODE -ne 0) { throw "BasicRHI fallback failed" }
+                  }
+                  git -C extern/BasicRHI submodule update --init --force --recursive --depth 1
+                  if ($LASTEXITCODE -ne 0) { throw "BasicRHI nested submodules failed" }
 
             # SPIRV-Tools forces a precompiled header (/FI pch_source.h) with Visual Studio
             # generators, but its source/ folder is no longer on the include path.
