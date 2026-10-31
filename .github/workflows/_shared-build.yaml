@@ -73,11 +73,14 @@ jobs:
                   cmake-preset: ${{ matrix.compiler.cmake-preset }}
                   build-dir: ${{ matrix.compiler.build-dir }}
                   
-            - name: Fix SPIRV-Tools PCH
+            - name: Disable SPIRV-Tools PCH
               shell: pwsh
               run: |
-                  $s = "extern/BasicRHI/third_party/SPIRV-Tools/source"
-                  Get-ChildItem $s -Directory -Recurse | ForEach-Object { Copy-Item "$s/pch_source.h" $_.FullName }
+                  $p = (Resolve-Path "extern/BasicRHI/third_party/SPIRV-Tools/CMakeLists.txt").Path
+                  $t = [IO.File]::ReadAllText($p)
+                  $n = [regex]::Replace($t, 'if\s*\(\s*MSVC\s+AND\s+CMAKE_GENERATOR\s+MATCHES', 'if(FALSE AND MSVC AND CMAKE_GENERATOR MATCHES')
+                  if ($n -eq $t) { throw "Pattern PCH non trovato" }
+                  [IO.File]::WriteAllText($p, $n)
 
             - name: Build using run-cmake
               uses: lukka/run-cmake@v10
