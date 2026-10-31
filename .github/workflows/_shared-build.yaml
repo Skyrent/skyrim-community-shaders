@@ -130,6 +130,12 @@ jobs:
                   path: extern/dxvk/build
                   key: ${{ runner.os }}-dxvk-trusted-v1-avxndebug-vksdk-${{ steps.dxvk_sha.outputs.sha }}
 
+            - name: Fix SPIRV-Tools PCH
+              shell: pwsh
+              run: |
+                    $s = "extern/BasicRHI/third_party/SPIRV-Tools/source"
+                    Get-ChildItem $s -Directory -Recurse | ForEach-Object { Copy-Item "$s/pch_source.h" $_.FullName }
+
             # The Nsight Aftermath SDK is not redistributable, so runners do not have it and the
             # AFTERMATH option (on by default for local builds) has to be turned off here. GPU crash
             # dumps are a developer aid; CI only needs the build to be exercised without them.
