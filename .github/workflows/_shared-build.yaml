@@ -72,6 +72,12 @@ jobs:
                   cache-key-suffix: "cpp-${{ matrix.compiler.name }}${{ inputs.cache-key-suffix }}"
                   cmake-preset: ${{ matrix.compiler.cmake-preset }}
                   build-dir: ${{ matrix.compiler.build-dir }}
+                  
+            - name: Fix SPIRV-Tools PCH
+              shell: pwsh
+              run: |
+                  $s = "extern/BasicRHI/third_party/SPIRV-Tools/source"
+                  Get-ChildItem $s -Directory -Recurse | ForEach-Object { Copy-Item "$s/pch_source.h" $_.FullName }
 
             - name: Build using run-cmake
               uses: lukka/run-cmake@v10
